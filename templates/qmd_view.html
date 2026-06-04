@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Dragon — {{ title }}{% endblock %}
+{% block content %}
+<div class="d-flex align-items-center gap-3 mb-3 flex-wrap">
+  <a href="/qmd" class="btn btn-sm btn-outline-secondary">← Back</a>
+  <h5 class="mb-0 me-auto">{{ title }}</h5>
+  <span class="text-muted small">{{ size_kb }} KB · {{ line_count }} lines</span>
+  {% if html_url %}
+  <a href="{{ html_url }}" target="_blank" class="btn btn-sm btn-outline-primary">🌐 View HTML</a>
+  {% endif %}
+  <button class="btn btn-sm btn-outline-secondary" onclick="copySource()">📋 Copy</button>
+</div>
+
+{% if frontmatter %}
+<details open class="mb-3">
+  <summary class="fw-semibold text-muted small" style="cursor:pointer">
+    YAML frontmatter
+  </summary>
+  <pre class="mt-2 p-3 rounded small"
+       style="background:#21262d;border:1px solid #30363d;overflow-x:auto;color:#e6edf3"
+       >{{ frontmatter | e }}</pre>
+</details>
+{% endif %}
+
+<div class="position-relative">
+  <pre id="source-content"
+       class="p-3 rounded small"
+       style="background:#1e1e2e;color:#cdd6f4;max-height:70vh;
+              overflow:auto;border:1px solid #444;line-height:1.6;
+              font-family:'Cascadia Code','Fira Code',monospace;tab-size:2"
+       >{{ body_md | e }}</pre>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const _sourceContent = {{ content | tojson }};
+{% raw %}
+function copySource() {
+  navigator.clipboard.writeText(_sourceContent).then(() => {
+    const btn = document.querySelector('[onclick="copySource()"]');
+    btn.textContent = '✔ Copied!';
+    setTimeout(() => btn.textContent = '📋 Copy', 2000);
+  });
+}
+{% endraw %}
+</script>
+{% endblock %}

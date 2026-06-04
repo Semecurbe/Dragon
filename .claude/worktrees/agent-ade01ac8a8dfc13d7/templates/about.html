@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Dragon — About{% endblock %}
+{% block content %}
+<div style="text-align:center; padding: 2rem 1rem 1rem;">
+  <img src="/static/dragon-about.svg" alt="Dragon" style="max-width:480px; width:100%; margin-bottom:1.5rem;">
+</div>
+<div style="max-width:640px; margin:0 auto; text-align:center;">
+  <p style="color:#c9d1d9; font-size:1.05rem; line-height:1.7; margin-bottom:1.2rem;">
+    <strong style="color:#e6edf3;">Dragon</strong> is a local RAG application that lets you
+    drag &amp; drop your documents and query them with AI — entirely on-premise.
+  </p>
+  <div style="display:flex; gap:1rem; justify-content:center; flex-wrap:wrap; margin-bottom:2rem;">
+    <div style="background:#21262d; border:1px solid #30363d; border-radius:10px; padding:1rem 1.4rem; min-width:160px;">
+      <div style="font-size:1.6rem; margin-bottom:.4rem;">📄</div>
+      <div style="color:#e6edf3; font-weight:600; margin-bottom:.3rem;">Any format</div>
+      <div style="color:#8b949e; font-size:.88rem;">PDF, DOCX, PPTX, HTML, Markdown…</div>
+    </div>
+    <div style="background:#21262d; border:1px solid #30363d; border-radius:10px; padding:1rem 1.4rem; min-width:160px;">
+      <div style="font-size:1.6rem; margin-bottom:.4rem;">🔍</div>
+      <div style="color:#e6edf3; font-weight:600; margin-bottom:.3rem;">Semantic search</div>
+      <div style="color:#8b949e; font-size:.88rem;">ChromaDB + sentence embeddings</div>
+    </div>
+    <div style="background:#21262d; border:1px solid #30363d; border-radius:10px; padding:1rem 1.4rem; min-width:160px;">
+      <div style="font-size:1.6rem; margin-bottom:.4rem;">🤖</div>
+      <div style="color:#e6edf3; font-weight:600; margin-bottom:.3rem;">Claude or Ollama</div>
+      <div style="color:#8b949e; font-size:.88rem;">Cloud API or fully local LLM</div>
+    </div>
+    <div style="background:#21262d; border:1px solid #30363d; border-radius:10px; padding:1rem 1.4rem; min-width:160px;">
+      <div style="font-size:1.6rem; margin-bottom:.4rem;">🏠</div>
+      <div style="color:#e6edf3; font-weight:600; margin-bottom:.3rem;">On-premise</div>
+      <div style="color:#8b949e; font-size:.88rem;">Your data never leaves your machine</div>
+    </div>
+  </div>
+  <hr style="border-color:#30363d; margin-bottom:1.5rem;">
+  <p style="color:#8b949e; font-size:.88rem; letter-spacing:.05em;">
+    DRAG AND RAG ON &nbsp;·&nbsp; Local RAG &nbsp;·&nbsp; Drag &amp; Drop &nbsp;·&nbsp; On-premise
+  </p>
+</div>
+{% endblock %}

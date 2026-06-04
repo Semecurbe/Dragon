@@ -1,0 +1,97 @@
+body { background:#0d1117; font-family:'Segoe UI',system-ui,sans-serif; color:#e6edf3; }
+.navbar { background:#0d1117!important; box-shadow:0 2px 8px rgba(0,0,0,.5); border-bottom:1px solid #30363d; }
+.page-card { background:#161b22; border-radius:12px; border:1px solid #30363d;
+              padding:1.6rem; margin-top:1rem; }
+#chat-box { height:460px; overflow-y:auto; background:#0d1117;
+             border-radius:8px; padding:1rem; border:1px solid #30363d; }
+.msg-user { background:#1f6feb; color:#fff; border-radius:14px 14px 2px 14px;
+             padding:.55rem 1rem; max-width:75%; margin-left:auto;
+             margin-bottom:.5rem; word-break:break-word; }
+.msg-bot  { background:#21262d; border:1px solid #30363d;
+             border-radius:2px 14px 14px 14px; padding:.55rem 1rem;
+             max-width:85%; margin-bottom:.5rem; word-break:break-word; color:#e6edf3; }
+.msg-bot p { margin:0; }
+.doc-card { background:#21262d; border:1px solid #30363d; border-radius:10px;
+             padding:.85rem 1.2rem; display:flex; justify-content:space-between;
+             align-items:center; margin-bottom:.5rem; }
+.spinner-border { width:1.2rem; height:1.2rem; }
+/* PWA standalone: add top padding for status bar */
+@media (display-mode: standalone) {
+  body { padding-top: env(safe-area-inset-top); }
+}
+#pwa-install-btn {
+  background: rgba(255,255,255,.15);
+  color: white;
+  border: 1px solid rgba(255,255,255,.35);
+  font-size: .8em;
+  padding: .25rem .7rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s;
+}
+#pwa-install-btn:hover { background: rgba(255,255,255,.25); }
+.drop-hover { background:#1c2333!important; border-color:#1f6feb!important; }
+#progress-log .ok  { color:#a6e3a1; }
+#progress-log .err { color:#f38ba8; }
+#progress-log .inf { color:#89dceb; }
+
+/* ── Thinking / RAG reasoning block ─────────────────────────── */
+.thinking-block {
+  margin-bottom: .5rem;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+  font-size: .82em;
+  color: #8b949e;
+}
+.thinking-block > summary {
+  padding: .4rem .75rem;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  user-select: none;
+}
+.thinking-block > summary::-webkit-details-marker { display: none; }
+.thinking-chevron {
+  display: inline-block;
+  font-size: .75em;
+  color: #58a6ff;
+  transition: transform .2s;
+}
+.thinking-block[open] > summary .thinking-chevron { transform: rotate(90deg); }
+.thinking-label { color: #58a6ff; font-weight: 600; }
+.thinking-stats { color: #6e7681; font-size: .9em; }
+.thinking-body {
+  padding: .5rem .75rem .75rem;
+  border-top: 1px solid #21262d;
+}
+.thinking-step {
+  padding: .25rem 0;
+  line-height: 1.45;
+  border-top: 1px solid #21262d;
+}
+.thinking-step:first-child { border-top: none; }
+.chunk-card {
+  margin-top: .4rem;
+  padding: .4rem .65rem;
+  border-radius: 4px;
+  border-left: 3px solid;
+  background: #161b22;
+}
+.chunk-card.match    { border-color: #238636; }
+.chunk-card.neighbor { border-color: #30363d; opacity: .8; }
+.chunk-header {
+  font-weight: 600;
+  color: #c9d1d9;
+  margin-bottom: .15rem;
+  font-size: .85em;
+}
+.chunk-text {
+  color: #6e7681;
+  font-size: .8em;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

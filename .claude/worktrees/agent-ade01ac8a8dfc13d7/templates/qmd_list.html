@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Dragon — Sources{% endblock %}
+{% block content %}
+{% if not qmd_files %}
+<div class="alert alert-warning">No QMD files found. Run the ingest pipeline first.</div>
+{% else %}
+<div class="d-flex align-items-center gap-3 mb-3">
+  <h5 class="mb-0">📝 QMD source files</h5>
+  <span class="badge bg-secondary">{{ qmd_files | length }} files</span>
+</div>
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>Title</th><th>Filename</th><th>Size</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in qmd_files %}
+      <tr>
+        <td class="fw-semibold">📄 {{ f.title }}</td>
+        <td class="text-muted small font-monospace">{{ f.name }}</td>
+        <td class="text-muted small">{{ f.size_kb }} KB</td>
+        <td class="d-flex gap-2 align-items-center">
+          <a href="/qmd/{{ f.name }}" class="btn btn-sm btn-primary">View source</a>
+          {% if f.html_exists %}
+          <a href="{{ f.html_url }}" target="_blank" class="btn btn-sm btn-outline-primary">🌐 HTML</a>
+          {% else %}
+          <span class="text-muted small">no HTML yet</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

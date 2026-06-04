@@ -1,0 +1,5 @@
+.rag_config.json
+/doc_input/
+/doc_output/
+/.quarto/
+**/*.quarto_ipynb

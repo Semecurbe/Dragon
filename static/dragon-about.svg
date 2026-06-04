@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 500" width="680">
+
+<!-- Subtle circular frame behind dragon -->
+<circle cx="340" cy="185" r="120" fill="none" stroke="#C0392B" stroke-width="0.5" opacity="0.15"/>
+<circle cx="340" cy="185" r="135" fill="none" stroke="#C0392B" stroke-width="0.3" opacity="0.08"/>
+
+<!-- Dragon head - geometric angular style, facing right -->
+<g transform="translate(340,185)">
+
+<!-- Main head silhouette -->
+<path d="
+  M -100,55
+  L -102,12
+  L -90,-25
+  L -98,-58
+  L -78,-28
+  L -60,-105
+  L -32,-22
+  L -5,-32
+  L 25,-26
+  L 55,-14
+  L 82,0
+  L 100,16
+  L 92,26
+  L 62,20
+  L 94,42
+  L 70,48
+  L 35,56
+  L -5,64
+  L -55,62
+  Z
+" fill="#C0392B"/>
+
+<!-- Horn darker accent -->
+<path d="M -78,-28 L -60,-105 L -45,-40" fill="#A93226" opacity="0.7"/>
+
+<!-- Smaller back spike accent -->
+<path d="M -90,-25 L -98,-58 L -78,-28" fill="#A93226" opacity="0.5"/>
+
+<!-- Jaw ridge -->
+<path d="M 62,20 L 94,42 L 70,48 L 45,42 Z" fill="#A93226" opacity="0.4"/>
+
+<!-- Eye -->
+<ellipse cx="12" cy="-8" rx="10" ry="9" fill="rgba(255,255,255,0.92)"/>
+<circle cx="16" cy="-8" r="5" fill="#1C2833"/>
+<circle cx="18" cy="-10" r="1.5" fill="rgba(255,255,255,0.7)"/>
+
+<!-- Nostril -->
+<ellipse cx="78" cy="8" rx="4" ry="3" fill="#A93226" opacity="0.5"/>
+
+<!-- Flame from mouth -->
+<path d="
+  M 62,20
+  L 92,26
+  L 100,16
+  L 115,8
+  L 125,14
+  L 118,22
+  L 132,20
+  L 122,30
+  L 130,36
+  L 112,34
+  L 94,42
+  Z
+" fill="#E67E22" opacity="0.85"/>
+
+<!-- Flame inner glow -->
+<path d="
+  M 92,26
+  L 110,18
+  L 115,24
+  L 108,30
+  L 94,42
+  L 80,32
+  Z
+" fill="#F39C12" opacity="0.6"/>
+
+<!-- Scale texture hints -->
+<line x1="-20" y1="15" x2="-5" y2="20" stroke="#A93226" stroke-width="0.8" opacity="0.3"/>
+<line x1="0" y1="20" x2="15" y2="28" stroke="#A93226" stroke-width="0.8" opacity="0.3"/>
+<line x1="-40" y1="25" x2="-22" y2="32" stroke="#A93226" stroke-width="0.8" opacity="0.3"/>
+<line x1="20" y1="8" x2="38" y2="12" stroke="#A93226" stroke-width="0.8" opacity="0.3"/>
+
+<!-- Document being consumed (near mouth) -->
+<g opacity="0.18">
+<rect x="96" y="-28" width="22" height="28" rx="2" fill="none" stroke="#333" stroke-width="1.2" transform="rotate(15, 107, -14)"/>
+<line x1="101" y1="-20" x2="113" y2="-20" stroke="#333" stroke-width="0.8" transform="rotate(15, 107, -14)"/>
+<line x1="101" y1="-14" x2="113" y2="-14" stroke="#333" stroke-width="0.8" transform="rotate(15, 107, -14)"/>
+<line x1="101" y1="-8" x2="109" y2="-8" stroke="#333" stroke-width="0.8" transform="rotate(15, 107, -14)"/>
+</g>
+
+</g>
+
+<!-- Wordmark: DRAGON -->
+<text x="340" y="380" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-size="56" font-weight="600" letter-spacing="8">
+<tspan fill="#C0392B">D</tspan><tspan fill="#C0392B">RAG</tspan><tspan fill="#333333">ON</tspan>
+</text>
+
+<!-- Accent line -->
+<line x1="248" y1="396" x2="432" y2="396" stroke="#C0392B" stroke-width="2" opacity="0.35"/>
+
+<!-- Tagline -->
+<text x="340" y="425" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-size="13" letter-spacing="5" fill="#888888">
+DRAG AND RAG ON
+</text>
+
+<!-- Subtitle -->
+<text x="340" y="455" text-anchor="middle" font-family="'Segoe UI','Helvetica Neue',Arial,sans-serif" font-size="11" fill="#aaaaaa" letter-spacing="1">
+Local RAG · Drag &amp; Drop · On-premise
+</text>
+
+</svg>

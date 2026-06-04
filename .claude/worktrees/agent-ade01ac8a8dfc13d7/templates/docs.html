@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}Dragon — Documentation{% endblock %}
+{% block content %}
+{% if not site_exists %}
+<div class="alert alert-warning">
+  <strong>⚠️ No documentation found.</strong><br>
+  Run <code>process_documents.py</code> then <code>quarto render</code> to generate the site.
+</div>
+{% else %}
+<div class="d-flex align-items-center gap-3 mb-3">
+  <h5 class="mb-0">Available documents</h5>
+  <a href="{{ base_url }}/" target="_blank" class="btn btn-sm btn-outline-primary">🏠 Open index ↗</a>
+</div>
+
+{% if not doc_cards %}
+<p class="text-muted">No HTML files found — run <code>quarto render</code>.</p>
+{% else %}
+{% for card in doc_cards %}
+<div class="doc-card" id="card-{{ card.stem }}">
+  <span>📄 <strong>{{ card.title }}</strong></span>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    {% if card.has_summary %}
+    <span class="badge bg-success" style="font-size:.7em">✔ saved</span>
+    {% endif %}
+    <a href="/summary/{{ card.stem }}" class="btn btn-sm btn-outline-secondary">📋 Summary</a>
+    <a href="{{ card.url }}" target="_blank" class="btn btn-sm btn-primary">Open ↗</a>
+    <button class="btn btn-sm btn-outline-danger"
+            onclick="openDeleteModal('{{ card.stem_js }}', '{{ card.title_js }}')">🗑️</button>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<!-- Delete confirmation modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title">🗑️ Delete document</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>Remove <strong id="del-doc-title"></strong> from the knowledge base?</p>
+        <p class="text-muted small mb-0">
+          This will delete the ChromaDB chunks, the <code>.qmd</code> file,
+          the HTML page and the summary if it exists.
+        </p>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-danger btn-sm" id="del-confirm-btn"
+                onclick="confirmDelete()">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="del-toast"
+     style="position:fixed;bottom:1.5rem;right:1.5rem;z-index:2000;display:none">
+  <div class="alert mb-0 py-2 px-3 shadow" id="del-toast-inner"></div>
+</div>
+
+<!-- ── RAG Filters ─────────────────────────────────────────────── -->
+<hr class="my-4" style="border-color:#30363d">
+<h5 class="mb-3">🔍 RAG Filters</h5>
+<p class="small mb-3" style="color:#8b949e">
+  A filter restricts the chat to a subset of documents.
+  Select the desired documents, give it a name and save.
+</p>
+
+<div class="row g-3">
+  <!-- Left column: create a filter -->
+  <div class="col-md-6">
+    <div class="p-3 rounded" style="background:#21262d;border:1px solid #30363d">
+      <p class="fw-semibold mb-2" style="color:#e6edf3">New filter</p>
+      <div id="filter-sources-list" class="mb-3">
+        <p class="small" style="color:#8b949e">Loading documents…</p>
+      </div>
+      <div class="d-flex gap-2">
+        <input id="filter-name-input" type="text" class="form-control form-control-sm"
+               placeholder="Filter name…" style="max-width:200px">
+        <button class="btn btn-sm btn-primary" onclick="saveFilter()">💾 Save</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="selectAllSources(true)">All</button>
+        <button class="btn btn-sm btn-outline-secondary" onclick="selectAllSources(false)">None</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right column: saved filters -->
+  <div class="col-md-6">
+    <div class="p-3 rounded" style="background:#21262d;border:1px solid #30363d">
+      <p class="fw-semibold mb-2" style="color:#e6edf3">Saved filters</p>
+      <div id="saved-filters-list">
+        <p class="small" style="color:#8b949e">Loading…</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if site_exists %}
+<script>
+{% raw %}
+let _pendingStem  = null;
+let _deleteModal  = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+  _deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
+});
+
+function openDeleteModal(stem, title) {
+  _pendingStem = stem;
+  document.getElementById('del-doc-title').textContent = title;
+  _deleteModal.show();
+}
+
+async function confirmDelete() {
+  if (!_pendingStem) return;
+  const btn  = document.getElementById('del-confirm-btn');
+  btn.disabled  = true;
+  btn.textContent = 'Deleting…';
+
+  try {
+    const r = await fetch('/api/doc/delete/' + _pendingStem, {method: 'POST'});
+    const d = await r.json();
+    _deleteModal.hide();
+
+    if (d.ok) {
+      // Remove the card from the DOM immediately
+      const card = document.getElementById('card-' + _pendingStem);
+      if (card) card.remove();
+      showToast('✔ Document removed from the knowledge base.', 'success');
+    } else {
+      showToast('Errors: ' + (d.errors || []).join(', '), 'danger');
+    }
+  } catch(e) {
+    showToast('Network error: ' + e, 'danger');
+  } finally {
+    btn.disabled   = false;
+    btn.textContent = 'Delete';
+    _pendingStem   = null;
+  }
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('del-toast');
+  const i = document.getElementById('del-toast-inner');
+  i.className = 'alert mb-0 py-2 px-3 shadow alert-' + type;
+  i.textContent = msg;
+  t.style.display = '';
+  setTimeout(() => { t.style.display = 'none'; }, 4000);
+}
+
+async function loadFilterPanel() {
+  const [srcResp, fltResp] = await Promise.all([
+    fetch('/api/sources').then(r => r.json()),
+    fetch('/api/filters').then(r => r.json()),
+  ]);
+
+  // Render source checkboxes
+  const srcDiv = document.getElementById('filter-sources-list');
+  if (!srcResp.sources.length) {
+    srcDiv.innerHTML = '<p class="small" style="color:#8b949e">No indexed documents.</p>';
+  } else {
+    srcDiv.innerHTML = srcResp.sources.map(s => `
+      <div class="form-check form-check-sm mb-1">
+        <input class="form-check-input filter-src-cb" type="checkbox"
+               id="fsrc-${s}" value="${s}" checked>
+        <label class="form-check-label small" for="fsrc-${s}"
+               style="color:#c9d1d9;cursor:pointer">
+          ${s.replace(/_chunks$/, '').replace(/_/g, ' ')}
+        </label>
+      </div>`).join('');
+  }
+
+  renderSavedFilters(fltResp.filters || {});
+}
+
+function renderSavedFilters(filters) {
+  const div = document.getElementById('saved-filters-list');
+  const names = Object.keys(filters);
+  if (!names.length) {
+    div.innerHTML = '<p class="small" style="color:#8b949e">No saved filters.</p>';
+    return;
+  }
+  div.innerHTML = names.map(name => {
+    const srcs = filters[name];
+    const label = srcs.map(s => s.replace(/_chunks$/, '').replace(/_/g, ' ')).join(', ');
+    return `
+      <div class="d-flex align-items-start gap-2 mb-2 p-2 rounded"
+           style="background:#161b22;border:1px solid #30363d">
+        <div class="flex-grow-1">
+          <strong class="small" style="color:#e6edf3">${name}</strong><br>
+          <span class="small" style="color:#8b949e">${label}</span>
+        </div>
+        <button class="btn btn-sm btn-outline-danger py-0 px-1"
+                onclick="deleteFilter('${name.replace(/'/g, "\\'")}')">🗑️</button>
+      </div>`;
+  }).join('');
+}
+
+function selectAllSources(checked) {
+  document.querySelectorAll('.filter-src-cb').forEach(cb => cb.checked = checked);
+}
+
+async function saveFilter() {
+  const name    = document.getElementById('filter-name-input').value.trim();
+  const sources = [...document.querySelectorAll('.filter-src-cb:checked')].map(cb => cb.value);
+  if (!name)    { alert('Please enter a filter name.'); return; }
+  if (!sources.length) { alert('Select at least one document.'); return; }
+  const r = await fetch('/api/filters/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, sources}),
+  });
+  const d = await r.json();
+  if (d.ok) {
+    document.getElementById('filter-name-input').value = '';
+    showToast('✔ Filter "' + name + '" saved.', 'success');
+    const flt = await fetch('/api/filters').then(r => r.json());
+    renderSavedFilters(flt.filters || {});
+  } else {
+    showToast('Error: ' + d.error, 'danger');
+  }
+}
+
+async function deleteFilter(name) {
+  if (!confirm('Delete filter "' + name + '"?')) return;
+  await fetch('/api/filters/delete/' + encodeURIComponent(name), {method: 'POST'});
+  showToast('Filter deleted.', 'secondary');
+  const flt = await fetch('/api/filters').then(r => r.json());
+  renderSavedFilters(flt.filters || {});
+}
+
+loadFilterPanel();
+{% endraw %}
+</script>
+{% endif %}
+{% endblock %}

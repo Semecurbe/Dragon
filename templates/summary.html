@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Dragon — Summary{% endblock %}
+{% block content %}
+{% if saved_summary %}
+<div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+  <a href="/docs" class="btn btn-sm btn-outline-secondary">← Docs</a>
+  <h5 class="mb-0 me-auto">{{ data.title }}</h5>
+  <span class="text-muted small">Generated {{ data.generated_at }}</span>
+  {% if html_url %}
+  <a href="{{ html_url }}" target="_blank" class="btn btn-sm btn-outline-primary">🌐 Open HTML</a>
+  {% endif %}
+  <a href="/summary/{{ stem }}?regen=1" class="btn btn-sm btn-outline-warning">🔄 Regenerate</a>
+</div>
+
+<div class="p-3 mb-4 rounded" style="background:#1c2333;border:1px solid #2d4f8a">
+  <p class="fw-semibold mb-1 small text-primary">📌 Executive summary</p>
+  <p class="mb-0">{{ data.global_summary }}</p>
+</div>
+
+<h6 class="text-muted mb-2">Sections</h6>
+{% for s in data.sections %}
+<div class="card mb-2 border-0 shadow-sm">
+  <div class="card-header fw-semibold py-2" style="background:#21262d;color:#e6edf3;border-bottom:1px solid #30363d">
+    {{ s.heading }}
+  </div>
+  <div class="card-body py-2" style="font-size:.93em;color:#c9d1d9;background:#161b22">
+    {{ s.summary }}
+  </div>
+</div>
+{% endfor %}
+
+{% else %}
+<div class="d-flex align-items-center gap-2 mb-3">
+  <a href="/docs" class="btn btn-sm btn-outline-secondary">← Docs</a>
+  <h5 class="mb-0">📋 Summary — {{ title }}</h5>
+</div>
+
+<div id="gen-start">
+  <p class="text-muted">No summary saved yet. Click to generate it section by section.</p>
+  <button class="btn btn-primary" onclick="startGeneration()">
+    ✨ Generate summary with AI
+  </button>
+</div>
+
+<div id="gen-progress" style="display:none">
+  <p class="fw-semibold mb-2">Generating…</p>
+  <div id="progress-log"
+       style="background:#1e1e2e;color:#cdd6f4;font-family:monospace;font-size:.82em;
+              border-radius:8px;padding:1rem;max-height:260px;overflow-y:auto">
+  </div>
+</div>
+
+<div id="summary-result" style="display:none"></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if not saved_summary %}
+<script>
+const _stem = {{ stem | tojson }};
+{% raw %}
+function startGeneration() {
+  document.getElementById('gen-start').style.display = 'none';
+  document.getElementById('gen-progress').style.display = '';
+  const log = document.getElementById('progress-log');
+
+  function addLog(html, cls='') {
+    const p = document.createElement('p');
+    p.style.margin = '2px 0';
+    p.style.color = cls === 'ok' ? '#a6e3a1' : cls === 'err' ? '#f38ba8' : '#89dceb';
+    p.innerHTML = html;
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  const es = new EventSource('/api/summary/stream/' + _stem);
+
+  es.onmessage = function(e) {
+    const d = JSON.parse(e.data);
+
+    if (d.type === 'log')  addLog(d.msg);
+    if (d.type === 'section') addLog('✔ ' + d.heading, 'ok');
+    if (d.type === 'error')  { addLog(d.msg, 'err'); es.close(); }
+
+    if (d.type === 'done') {
+      es.close();
+      addLog('✅ Done — loading summary…', 'ok');
+      // Reload the page to show the saved summary
+      setTimeout(() => location.reload(), 800);
+    }
+  };
+
+  es.onerror = function() {
+    addLog('❌ Connection lost.', 'err');
+    es.close();
+  };
+}
+{% endraw %}
+</script>
+{% endif %}
+{% endblock %}

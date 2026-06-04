@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Dragon — Ingest{% endblock %}
+{% block content %}
+<h5 class="mb-1">📤 Add a new document</h5>
+<p class="text-muted small mb-3">
+  Upload a file to convert it to Quarto pages + chunks, index it in ChromaDB
+  and rebuild the documentation site.
+</p>
+
+<!-- Drop zone -->
+<div id="drop-zone"
+     onclick="document.getElementById('ingest-file').click()"
+     ondragover="event.preventDefault();this.classList.add('drop-hover')"
+     ondragleave="this.classList.remove('drop-hover')"
+     ondrop="handleDrop(event)"
+     style="border:2px dashed #30363d;border-radius:12px;padding:3rem 2rem;
+            text-align:center;cursor:pointer;transition:background .2s;margin-bottom:1rem;background:#161b22">
+  <div style="font-size:2.5rem">📂</div>
+  <p class="mb-1 fw-semibold">Drag &amp; drop your file here</p>
+  <p class="text-muted small mb-0">or click to browse</p>
+  <p class="text-muted small">Supported: {{ exts }}</p>
+</div>
+<input type="file" id="ingest-file" style="display:none"
+       accept="{{ accept }}"
+       onchange="startIngest(this.files[0])">
+
+<!-- Progress log -->
+<div id="progress-box" style="display:none">
+  <hr>
+  <p class="fw-semibold mb-2">Processing…</p>
+  <div id="progress-log"
+       style="background:#1e1e2e;color:#cdd6f4;font-family:monospace;font-size:.85em;
+              border-radius:8px;padding:1rem;max-height:320px;overflow-y:auto">
+  </div>
+  <div id="progress-done" class="mt-3" style="display:none">
+    <a href="/docs" class="btn btn-success">📚 View documentation →</a>
+    <button class="btn btn-outline-secondary ms-2" onclick="resetForm()">Upload another</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% raw %}
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drop-hover');
+  const file = e.dataTransfer.files[0];
+  if (file) startIngest(file);
+}
+
+async function startIngest(file) {
+  if (!file) return;
+
+  // Show progress box
+  document.getElementById('drop-zone').style.display = 'none';
+  document.getElementById('progress-box').style.display = '';
+  const log = document.getElementById('progress-log');
+  log.innerHTML = '';
+
+  function addLine(html, cls='inf') {
+    const p = document.createElement('p');
+    p.className = cls;
+    p.style.margin = '2px 0';
+    p.innerHTML = html;
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  addLine('⬆️ Uploading ' + file.name + '…');
+
+  // Step 1: upload
+  const fd = new FormData();
+  fd.append('file', file);
+  let jobId;
+  try {
+    const r  = await fetch('/api/ingest/upload', {method:'POST', body:fd});
+    const d  = await r.json();
+    if (d.error) { addLine('❌ ' + d.error, 'err'); return; }
+    jobId = d.job_id;
+    addLine('✔ File uploaded — starting pipeline…', 'ok');
+  } catch(e) {
+    addLine('❌ Upload failed: ' + e, 'err');
+    return;
+  }
+
+  // Step 2: SSE stream
+  const es = new EventSource('/api/ingest/stream/' + jobId);
+  es.onmessage = function(e) {
+    const d = JSON.parse(e.data);
+    const cls = d.error ? 'err' : (d.done ? 'ok' : 'inf');
+    addLine(d.msg, cls);
+    if (d.done) {
+      es.close();
+      document.getElementById('progress-done').style.display = '';
+    }
+  };
+  es.onerror = function() {
+    addLine('❌ Connection lost.', 'err');
+    es.close();
+  };
+}
+
+function resetForm() {
+  document.getElementById('ingest-file').value = '';
+  document.getElementById('drop-zone').style.display = '';
+  document.getElementById('progress-box').style.display = 'none';
+  document.getElementById('progress-done').style.display = 'none';
+  document.getElementById('progress-log').innerHTML = '';
+}
+{% endraw %}
+</script>
+{% endblock %}
