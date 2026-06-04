@@ -1,176 +1,206 @@
-# Installation — Drag and Rag
+# Installation — Dragon
 
-Guide d'installation complet pour Linux et macOS.
+Complete installation guide for Linux and macOS.
 
 ---
 
-## Prérequis
+## Prerequisites
 
-| Outil | Version minimale | Vérification |
+| Tool | Minimum version | Check |
 |---|---|---|
 | Python | 3.10+ | `python3 --version` |
-| pip | inclus avec Python | `pip3 --version` |
+| pip | bundled with Python | `pip3 --version` |
 | Quarto | 1.4+ | `quarto --version` |
-| Clé API Anthropic | — | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
+| LLM API key | — | see [§ 5 — API keys](#5-configure-an-llm-provider) |
 
 ---
 
-## 1. Installer Quarto
+## 1. Install Quarto
 
-Quarto est le moteur de rendu de la documentation HTML. Il doit être installé séparément de Python.
+Quarto renders the documentation as a static HTML site. It must be installed separately from Python.
 
-**Linux (Debian/Ubuntu) :**
+**Linux (Debian/Ubuntu):**
 ```bash
-# Télécharger le .deb depuis https://quarto.org/docs/get-started/
+# Download the .deb from https://quarto.org/docs/get-started/
 wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.37/quarto-1.9.37-linux-amd64.deb
 sudo dpkg -i quarto-1.9.37-linux-amd64.deb
-quarto --version   # vérification
+quarto --version   # verify
 ```
 
-**macOS :**
+**macOS:**
 ```bash
 brew install quarto
 ```
 
 ---
 
-## 2. Cloner ou copier le projet
+## 2. Clone or copy the project
 
 ```bash
-# Si vous avez git :
-git clone <url-du-repo> drag-and-rag
-cd drag-and-rag
+# With git:
+git clone <repo-url> dragon
+cd dragon
 
-# Sinon, copier les fichiers manuellement dans un dossier :
-mkdir drag-and-rag && cd drag-and-rag
-# → copier app_flask.py, process_documents.py, embed_and_query.py,
-#          requirements.txt dans ce dossier
+# Without git — copy the files manually:
+mkdir dragon && cd dragon
+# → copy app_flask.py, process_documents.py, ingest_dir.py,
+#          requirements.txt, static/, templates/ into this folder
 ```
 
 ---
 
-## 3. Créer l'environnement virtuel Python
+## 3. Create a Python virtual environment
 
 ```bash
-# Créer l'environnement (une seule fois)
+# Create the environment (once only)
 python3 -m venv env
 
-# Activer l'environnement
+# Activate it
 source env/bin/activate          # Linux / macOS
 # env\Scripts\activate           # Windows
 
-# Vérification : le prompt doit afficher (env)
+# Your prompt should now show (env)
 ```
 
-> ⚠️ **À faire à chaque nouvelle session** : `source env/bin/activate`
+> ⚠️ **Activate the environment at every new session:** `source env/bin/activate`
 
 ---
 
-## 4. Installer les dépendances Python
+## 4. Install Python dependencies
 
 ```bash
-# Vérifier que l'environnement est actif (prompt affiche (env))
+# Make sure the environment is active (prompt shows (env))
 pip install -r requirements.txt
 ```
 
-L'installation prend quelques minutes — `docling` et `sentence-transformers`
-téléchargent des modèles lors du premier usage.
+Installation takes a few minutes — `docling` and `sentence-transformers` download
+their models on first use.
 
-| Package | Rôle |
+| Package | Role |
 |---|---|
-| `flask` | Interface web |
-| `anthropic` | API Claude (traduction + réponses RAG) |
-| `docling` | Conversion de documents (PDF, DOCX, PPTX…) |
-| `chromadb` | Base vectorielle locale |
-| `sentence-transformers` | Modèle d'embedding local (`all-MiniLM-L6-v2`) |
+| `flask` | Web interface |
+| `anthropic` | Claude API (translation + RAG answers) |
+| `docling` | Document conversion (PDF, DOCX, PPTX…) |
+| `chromadb` | Local vector database |
+| `sentence-transformers` | Local embedding model (`all-MiniLM-L6-v2`) |
 
----
+### Optional packages (for Gemini or OpenAI)
 
-## 5. Obtenir une clé API Anthropic
-
-1. Créer un compte sur [console.anthropic.com](https://console.anthropic.com)
-2. Aller dans **Settings → API Keys → Create Key**
-3. Copier la clé (format `sk-ant-api03-…`)
-
-La clé sera saisie directement dans l'interface web (onglet ⚙️ Settings) et
-sera sauvegardée dans `.rag_config.json` localement.
-
----
-
-## 6. Lancer l'application
+If you plan to use Google Gemini or OpenAI/ChatGPT as your LLM provider, install the
+corresponding package:
 
 ```bash
-# S'assurer que l'environnement est actif
+pip install google-generativeai   # Google Gemini
+pip install openai                 # OpenAI / ChatGPT
+```
+
+These packages are imported lazily — the application starts normally even if they are
+not installed. A clear error is shown in the chat if a missing package is needed.
+
+---
+
+## 5. Configure an LLM provider
+
+Dragon supports four LLM providers. Configure the one you want in the **⚙️ Settings** tab
+after starting the app — the key is stored locally in `.rag_config.json`.
+
+| Provider | Where to get a key |
+|---|---|
+| **Claude** (Anthropic) | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) |
+| **Gemini** (Google) | [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) |
+| **ChatGPT** (OpenAI) | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| **Ollama** (local) | No key needed — install [ollama.com](https://ollama.com/download), then `ollama pull <model>` |
+
+---
+
+## 6. Start the application
+
+```bash
+# Make sure the environment is active
 source env/bin/activate
 
-# Démarrer le serveur Flask
+# Start the Flask server
 python3 app_flask.py
 ```
 
-Ouvrir dans le navigateur : **http://localhost:7860**
+Open in your browser: **http://localhost:7860**
 
-L'application démarre avec 5 onglets :
-- 💬 **Chat** — poser des questions sur les documents
-- 📚 **Documentation** — parcourir les docs HTML générés
-- 📝 **Sources** — voir les fichiers `.qmd` bruts
-- 📤 **Ingest** — ajouter de nouveaux documents par glisser-déposer
-- ⚙️ **Settings** — configurer la clé API
+The application has six tabs:
+
+| Tab | Description |
+|---|---|
+| 💬 **Chat** | Ask questions about your documents with real-time reasoning display |
+| 📚 **Documentation** | Browse the rendered HTML documentation site |
+| 📝 **Sources** | Inspect the raw `.qmd` source files |
+| 📤 **Ingest** | Add new documents via drag-and-drop |
+| ⚙️ **Settings** | Configure your LLM provider, RAG parameters, and system prompt |
+| 🐉 **About** | App information |
+
+> The app is also accessible from other devices on your local network at the IP address
+> printed in the terminal at startup.
 
 ---
 
-## 7. Ajouter vos premiers documents
+## 7. Add your first documents
 
-### Via l'interface web (recommandé)
+### Via the web interface (recommended)
 
-1. Aller dans l'onglet **📤 Ingest**
-2. Glisser-déposer un fichier PDF, DOCX, PPTX, HTML, Markdown ou XLSX
-3. Attendre la fin du pipeline (conversion → chunks → ChromaDB → rendu Quarto)
-4. Le document est immédiatement disponible dans Chat et Documentation
+1. Go to the **📤 Ingest** tab
+2. Drag and drop a PDF, DOCX, PPTX, HTML, Markdown, or XLSX file
+3. Watch the real-time pipeline: conversion → chunks → ChromaDB → Quarto render
+4. The document is immediately available in Chat and Documentation
 
-### Via la ligne de commande
+### Via the command line (batch ingestion)
+
+Use `ingest_dir.py` to ingest an entire directory at once:
 
 ```bash
-# Placer les documents dans doc_input/
-python3 process_documents.py doc_input/ doc_output/
+python3 ingest_dir.py /path/to/documents/
 
-# Indexer les chunks dans ChromaDB
-python3 embed_and_query.py index doc_output/chunks/
-
-# Rendre la documentation Quarto
-cd doc_output/quarto && quarto render && cd ../..
-
-# Configurer le chemin du site dans .rag_config.json
-# (fait automatiquement par l'interface web)
+# Options:
+#   --output   custom output directory (default: doc_output/)
+#   --db       custom ChromaDB directory (default: .chroma_db/)
+#   --no-render  skip the Quarto render step
+#   --force    re-ingest documents that are already indexed
 ```
 
 ---
 
-## Structure des fichiers générés
+## File structure
 
 ```
-drag-and-rag/
-├── app_flask.py            # Application web Flask
-├── process_documents.py    # Pipeline de conversion
-├── embed_and_query.py      # Indexation ChromaDB
-├── requirements.txt        # Dépendances Python
+dragon/
+├── app_flask.py            # Flask web application
+├── process_documents.py    # Document conversion pipeline
+├── ingest_dir.py           # CLI batch ingestion tool
+├── requirements.txt        # Python dependencies
 │
-├── doc_input/              # ← Déposer vos documents ici
+├── static/
+│   ├── css/dragon.css      # Application stylesheet
+│   └── *.svg / *.json      # Icons, manifest, service worker
+├── templates/              # Jinja2 HTML templates
+│   ├── base.html
+│   ├── chat.html
+│   ├── docs.html
+│   └── …
+│
+├── doc_input/              # ← Drop your source documents here
 ├── doc_output/
-│   ├── chunks/             # Fragments JSON (texte + métadonnées)
-│   ├── summaries/          # Résumés IA générés (cache)
+│   ├── chunks/             # JSON fragment files (text + metadata)
+│   ├── summaries/          # AI-generated summaries (cache)
 │   └── quarto/
-│       ├── *.qmd           # Pages Quarto générées
-│       ├── _quarto.yml     # Configuration du site
-│       └── _site/          # ← Site HTML rendu (servi sur port 8080)
+│       ├── *.qmd           # Generated Quarto pages
+│       ├── _quarto.yml     # Site configuration
+│       └── _site/          # ← Rendered HTML site (served on port 8080)
 │
-├── .chroma_db/             # Base vectorielle ChromaDB (auto-créé)
-├── .rag_config.json        # Configuration locale (clé API, chemins)
-└── env/                    # Environnement virtuel Python
+├── .chroma_db/             # ChromaDB vector database (auto-created)
+├── .rag_config.json        # Local configuration (API keys, paths, settings)
+└── env/                    # Python virtual environment
 ```
 
 ---
 
-## Formats de documents supportés
+## Supported document formats
 
 | Format | Extension |
 |---|---|
@@ -184,91 +214,98 @@ drag-and-rag/
 
 ---
 
-## Dépannage
+## Troubleshooting
 
 ### `ModuleNotFoundError: No module named 'flask'`
-→ L'environnement virtuel n'est pas activé.
+The virtual environment is not activated.
 ```bash
 source env/bin/activate
 ```
 
-### `Error: no API key set`
-→ Aller dans l'onglet ⚙️ Settings et saisir la clé API.
+### `Error: no API key configured`
+Go to the **⚙️ Settings** tab and enter your API key for the selected provider.
 
-### La documentation ne s'affiche pas
-→ Vérifier que `quarto render` a bien été lancé (automatique via Ingest, sinon manuellement) :
+### Documentation tab is empty
+Make sure `quarto render` has been run (happens automatically after an Ingest, or
+manually):
 ```bash
 cd doc_output/quarto && quarto render
 ```
-→ Vérifier que le chemin du site est configuré dans `.rag_config.json` :
+Also verify that the site path is set in `.rag_config.json`:
 ```json
 {
-  "quarto_site": "/chemin/absolu/vers/doc_output/quarto/_site"
+  "quarto_site": "/absolute/path/to/doc_output/quarto/_site"
 }
 ```
 
-### Erreur `address already in use` au démarrage
-→ Un autre processus utilise le port 7860 ou 8080. Tuer le processus :
+### `address already in use` at startup
+Another process is using port 7860 or 8080. Kill it:
 ```bash
-# Trouver et tuer le processus sur le port 7860
 lsof -ti:7860 | xargs kill -9
+lsof -ti:8080 | xargs kill -9
 ```
 
-### Premier lancement lent
-→ Normal : `sentence-transformers` télécharge le modèle `all-MiniLM-L6-v2`
-(~90 Mo) lors du premier appel. Les lancements suivants sont instantanés.
+### Slow first startup
+Expected behaviour: `sentence-transformers` downloads the `all-MiniLM-L6-v2` model
+(~90 MB) on first use. Subsequent startups are instant.
+
+### Gemini or OpenAI not working
+Make sure the optional package is installed:
+```bash
+pip install google-generativeai   # for Gemini
+pip install openai                 # for OpenAI
+```
 
 ---
 
-## Installation système (démarrage automatique)
+## System-wide installation (auto-start)
 
-Pour que l'application se lance automatiquement au démarrage de l'ordinateur,
-utilisez le script d'installation système qui déploie l'app dans `/opt/drag_and_rag`
-et configure un service **systemd**.
+To have Dragon start automatically at system boot, use the installation script which
+deploys the app to `/opt/drag_and_rag` and configures a **systemd** service.
 
-### Installation
+### Install
 
 ```bash
 sudo ./install.sh
 ```
 
-Le script :
-1. Copie le projet dans `/opt/drag_and_rag` (avec rsync)
-2. Crée un environnement virtuel dédié `/opt/drag_and_rag/env`
-3. Installe les dépendances Python
-4. Met à jour les chemins dans `.rag_config.json`
-5. Crée et active le service systemd `drag_and_rag`
+The script:
+1. Copies the project to `/opt/drag_and_rag` (via rsync)
+2. Creates a dedicated virtual environment `/opt/drag_and_rag/env`
+3. Installs Python dependencies
+4. Updates paths in `.rag_config.json`
+5. Creates and enables the `drag_and_rag` systemd service
 
-L'application est ensuite disponible sur **http://localhost:7860** à chaque démarrage.
+The app is then available at **http://localhost:7860** on every boot.
 
-### Commandes de gestion du service
-
-```bash
-sudo systemctl status  drag_and_rag     # état du service
-sudo systemctl restart drag_and_rag     # relancer
-sudo systemctl stop    drag_and_rag     # arrêter
-sudo systemctl disable drag_and_rag     # ne plus lancer au démarrage
-sudo journalctl -u drag_and_rag -f      # logs en direct
-```
-
-### Mise à jour après modification du code
+### Service management
 
 ```bash
-# Depuis le répertoire source (pas /opt)
-sudo ./install.sh    # idempotent — met à jour sans perdre les données
+sudo systemctl status  drag_and_rag     # service status
+sudo systemctl restart drag_and_rag     # restart
+sudo systemctl stop    drag_and_rag     # stop
+sudo systemctl disable drag_and_rag     # disable auto-start
+sudo journalctl -u drag_and_rag -f      # live logs
 ```
 
-### Désinstallation système
+### Update after code changes
+
+```bash
+# From the source directory (not /opt)
+sudo ./install.sh    # idempotent — updates without losing data
+```
+
+### Uninstall
 
 ```bash
 sudo ./uninstall.sh
 ```
 
-Arrête le service, le retire de systemd et supprime `/opt/drag_and_rag`.
+Stops the service, removes it from systemd, and deletes `/opt/drag_and_rag`.
 
 ---
 
-## Mise à jour (mode développement)
+## Update (development mode)
 
 ```bash
 source env/bin/activate
@@ -277,9 +314,9 @@ pip install -r requirements.txt --upgrade
 
 ---
 
-## Désinstallation (mode développement)
+## Uninstall (development mode)
 
 ```bash
-# Supprimer l'environnement virtuel et les données générées
+# Remove the virtual environment and generated data
 rm -rf env/ .chroma_db/ doc_output/ .rag_config.json
 ```
