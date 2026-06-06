@@ -8,6 +8,7 @@ Usage: python app_flask.py
 import functools
 import http.server
 import json
+import logging
 import os
 import queue
 import re
@@ -16,6 +17,7 @@ import socket
 import socketserver
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.request
 import uuid
@@ -49,10 +51,18 @@ DEFAULT_SYSTEM_PROMPT = (
     "Answer questions based on the sources below. "
     "If the answer is not found in any source, say so clearly. "
     "Keep a natural conversation flow and remember previous messages."
+    "Add a joke at the end of your response with an emoticon at the beginning to flag it."
 )
 
 # Directory where app_flask.py lives (used to resolve relative paths)
 APP_DIR = Path(__file__).parent
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("dragon")
 
 
 def _get_local_ip() -> str:
@@ -68,6 +78,7 @@ def _get_local_ip() -> str:
 HOST_IP   = _get_local_ip()
 DOCS_BASE = f"http://{HOST_IP}:{DOCS_PORT}"
 APP_BASE  = f"http://{HOST_IP}:{APP_PORT}"
+log.info("Dragon initialising — app: %s  docs: %s", APP_BASE, DOCS_BASE)
 
 chroma   = chromadb.PersistentClient(path=".chroma_db")
 embed_fn = SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
@@ -177,9 +188,11 @@ def start_docs_server(site_dir: Path, port: int) -> bool:
     try:
         httpd = socketserver.TCPServer(("", port), handler)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        log.info("[docs] server started → http://%s:%d/ (serving %s)", HOST_IP, port, site_dir)
         print(f"Documentation available at http://{HOST_IP}:{port}/")
         return True
     except OSError:
+        log.warning("[docs] port %d already in use — server not started", port)
         print(f"Port {port} already in use — docs server not started.")
         return False
 
@@ -257,37 +270,39 @@ def _llm_chat(
     """Unified LLM call — routes to Claude, Gemini, OpenAI or Ollama."""
     config   = load_config()
     provider = config.get("llm_provider", "claude")
+    t0 = time.time()
 
     if provider == "ollama":
-        url   = config.get("ollama_url",   "http://localhost:11434")
-        model = config.get("ollama_model", "llama3.2")
-        return _ollama_chat(messages, system=system, url=url, model=model)
+        model  = config.get("ollama_model", "llama3.2")
+        url    = config.get("ollama_url",   "http://localhost:11434")
+        log.info("[llm] calling ollama/%s (%d messages)", model, len(messages))
+        result = _ollama_chat(messages, system=system, url=url, model=model)
 
-    if provider == "gemini":
-        return _gemini_chat(
-            messages, system=system,
-            model=config.get("gemini_model", "gemini-2.0-flash"),
-            api_key=config.get("gemini_api_key", ""),
-        )
+    elif provider == "gemini":
+        model  = config.get("gemini_model", "gemini-2.0-flash")
+        log.info("[llm] calling gemini/%s (%d messages)", model, len(messages))
+        result = _gemini_chat(messages, system=system, model=model,
+                               api_key=config.get("gemini_api_key", ""))
 
-    if provider == "openai":
-        return _openai_chat(
-            messages, system=system,
-            model=config.get("openai_model", "gpt-4o"),
-            api_key=config.get("openai_api_key", ""),
-        )
+    elif provider == "openai":
+        model  = config.get("openai_model", "gpt-4o")
+        log.info("[llm] calling openai/%s (%d messages)", model, len(messages))
+        result = _openai_chat(messages, system=system, model=model,
+                               api_key=config.get("openai_api_key", ""))
 
-    # ── Claude (default) ─────────────────────────────────────────────────────
-    client = anthropic.Anthropic()
-    kwargs: dict = dict(
-        model=CLAUDE_MODEL,
-        max_tokens=max_tokens,
-        messages=messages,
-    )
-    if system:
-        kwargs["system"] = system
-    resp = client.messages.create(**kwargs)
-    return resp.content[0].text
+    else:
+        # ── Claude (default) ─────────────────────────────────────────────────
+        model  = CLAUDE_MODEL
+        log.info("[llm] calling claude/%s (%d messages)", model, len(messages))
+        client = anthropic.Anthropic()
+        kwargs: dict = dict(model=model, max_tokens=max_tokens, messages=messages)
+        if system:
+            kwargs["system"] = system
+        resp   = client.messages.create(**kwargs)
+        result = resp.content[0].text
+
+    log.info("[llm] %s/%s answered in %.1fs", provider, model, time.time() - t0)
+    return result
 
 
 # ── RAG pipeline ──────────────────────────────────────────────────────────────
@@ -473,8 +488,12 @@ def _process_file_task(file_path: Path, job_id: str) -> None:
     def put(msg: str, done: bool = False, error: bool = False) -> None:
         q.put({"msg": msg, "done": done, "error": error})
 
+    t_total = time.time()
+    log.info("[ingest:%s] start — %s", job_id, file_path.name)
+
     try:
         if file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            log.warning("[ingest:%s] unsupported format: %s", job_id, file_path.suffix)
             put(f"❌ Unsupported format: {file_path.suffix}", done=True, error=True)
             return
 
@@ -482,6 +501,7 @@ def _process_file_task(file_path: Path, job_id: str) -> None:
         put(f"📄 Processing <strong>{file_path.name}</strong>…")
 
         # ── 1. Convert ────────────────────────────────────────────────────────
+        t = time.time()
         pdf_opts = PdfPipelineOptions()
         pdf_opts.generate_picture_images = True
         pdf_opts.images_scale = 2.0
@@ -489,24 +509,30 @@ def _process_file_task(file_path: Path, job_id: str) -> None:
             format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_opts)}
         )
         result = converter.convert(str(file_path))
+        log.info("[ingest:%s] 1/7 conversion done in %.1fs", job_id, time.time() - t)
         put("✔ Document converted")
 
         # ── 2. Markdown + image extraction ────────────────────────────────────
+        t = time.time()
         md_embedded = result.document.export_to_markdown(image_mode=ImageRefMode.EMBEDDED)
         images_dir  = quarto_dir / f"{file_path.stem}_files"
         markdown    = strip_toc_and_summary(
             extract_images(md_embedded, images_dir, file_path.stem)
         )
         n_images    = len(list(images_dir.iterdir())) if images_dir.exists() else 0
+        log.info("[ingest:%s] 2/7 markdown exported in %.1fs (%d images)", job_id, time.time() - t, n_images)
         put(f"✔ Markdown exported ({n_images} image{'s' if n_images != 1 else ''})")
 
         # ── 3. Quarto page ────────────────────────────────────────────────────
+        t = time.time()
         title   = file_path.stem.replace("_", " ").replace("-", " ").title()
         qmd_path = quarto_dir / f"{file_path.stem}.qmd"
         qmd_path.write_text(build_quarto_page(title, markdown), encoding="utf-8")
+        log.info("[ingest:%s] 3/7 QMD written in %.1fs → %s", job_id, time.time() - t, qmd_path.name)
         put(f"✔ Quarto page created: <code>{qmd_path.name}</code>")
 
         # ── 4. Chunking ───────────────────────────────────────────────────────
+        t = time.time()
         chunker         = HierarchicalChunker()
         chunks          = list(chunker.chunk(result.document))
         all_chunks_data = [chunk_to_dict(c, i) for i, c in enumerate(chunks)]
@@ -518,9 +544,12 @@ def _process_file_task(file_path: Path, job_id: str) -> None:
         json_path.write_text(
             json.dumps(chunks_data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        log.info("[ingest:%s] 4/7 chunking done in %.1fs — %d chunks (%d TOC removed)",
+                 job_id, time.time() - t, len(chunks_data), removed)
         put(f"✔ {len(chunks)} chunks saved")
 
         # ── 5. Index in ChromaDB ──────────────────────────────────────────────
+        t = time.time()
         collection  = get_collection()
         source_name = file_path.stem + "_chunks"
         existing    = collection.get(where={"source": source_name})
@@ -538,14 +567,19 @@ def _process_file_task(file_path: Path, job_id: str) -> None:
             ids.append(f"{source_name}_{chunk['index']}")
         if texts:
             collection.add(documents=texts, metadatas=metas, ids=ids)
+        log.info("[ingest:%s] 5/7 indexed %d vectors in ChromaDB in %.1fs",
+                 job_id, len(texts), time.time() - t)
         put(f"✔ Indexed {len(texts)} chunks in ChromaDB")
 
         # ── 6. Rebuild Quarto index ───────────────────────────────────────────
+        t = time.time()
         _rebuild_quarto_index(quarto_dir, chunks_dir)
+        log.info("[ingest:%s] 6/7 Quarto index rebuilt in %.1fs", job_id, time.time() - t)
         put("✔ Documentation index regenerated")
 
         # ── 7. Quarto render ──────────────────────────────────────────────────
         put("🔄 Running <code>quarto render</code>…")
+        t = time.time()
         try:
             qr = subprocess.run(
                 ["quarto", "render"],
@@ -553,19 +587,25 @@ def _process_file_task(file_path: Path, job_id: str) -> None:
                 capture_output=True, text=True, timeout=300,
             )
             if qr.returncode == 0:
+                log.info("[ingest:%s] 7/7 quarto render done in %.1fs", job_id, time.time() - t)
                 put("✔ Quarto render completed — documentation updated")
                 start_docs_server(quarto_dir / "_site", DOCS_PORT)
             else:
                 err = (qr.stderr or qr.stdout)[:300]
+                log.error("[ingest:%s] quarto render failed (rc=%d): %s", job_id, qr.returncode, err)
                 put(f"⚠️ Quarto render error: <pre>{err}</pre>")
         except FileNotFoundError:
+            log.warning("[ingest:%s] quarto not found in PATH", job_id)
             put("⚠️ <code>quarto</code> not found — run <code>quarto render</code> manually")
         except subprocess.TimeoutExpired:
+            log.warning("[ingest:%s] quarto render timed out", job_id)
             put("⚠️ Quarto render timed out — run manually")
 
+        log.info("[ingest:%s] done in %.1fs total", job_id, time.time() - t_total)
         put("✅ Done! The document is now available.", done=True)
 
     except Exception as exc:
+        log.exception("[ingest:%s] unexpected error: %s", job_id, exc)
         put(f"❌ Unexpected error: {exc}", done=True, error=True)
 
 
@@ -829,6 +869,8 @@ def settings_save():
     updates["system_prompt"] = request.form.get("system_prompt", "").strip()
 
     save_config(updates)
+    log.info("[settings] saved — provider=%s n_results=%s neighbor_chunks=%s",
+             provider, updates.get("n_results"), updates.get("neighbor_chunks"))
     return redirect(f"/settings?msg_type=success&msg={msg}")
 
 
@@ -916,39 +958,54 @@ def api_chat():
     # Check prerequisites depending on provider
     config   = load_config()
     provider = config.get("llm_provider", "claude")
+    t_total  = time.time()
+    log.info("[chat] start — provider=%s history=%d filter=%s",
+             provider, len(history), filter_sources or "all")
+
     missing_key = (
         (provider == "claude"  and not os.environ.get("ANTHROPIC_API_KEY")) or
         (provider == "gemini"  and not config.get("gemini_api_key")) or
         (provider == "openai"  and not config.get("openai_api_key"))
     )
     if missing_key:
+        log.warning("[chat] no API key configured for provider=%s", provider)
         return jsonify({
             "answer": "**Error**: no API key configured. Go to **⚙️ Settings**.",
             "refs": "", "translations": "",
         })
 
+    t = time.time()
     try:
         question_en, question_fr = translate_question(message)
     except Exception as e:
+        log.error("[chat] translation failed: %s", e)
         return jsonify({"answer": f"**Translation error**: {e}", "refs": "", "translations": ""})
+    log.info("[chat] translation done in %.1fs — EN: %s", time.time() - t, question_en)
 
     translations = (
         f"<strong>Queries sent to the index:</strong><br>"
         f"🇬🇧 {question_en}<br>🇫🇷 {question_fr}"
     )
 
-    n_results      = int(config.get("n_results",      N_RESULTS))
+    n_results       = int(config.get("n_results",       N_RESULTS))
     neighbor_chunks = int(config.get("neighbor_chunks", NEIGHBOR_CHUNKS))
     where      = _build_where(filter_sources)
     collection = get_collection()
+
+    t = time.time()
     query_kw   = {"n_results": n_results, **({"where": where} if where else {})}
     results_en = collection.query(query_texts=[question_en], **query_kw)
     results_fr = collection.query(query_texts=[question_fr], **query_kw)
     matched_ids, docs, metas = merge_results(results_en, results_fr)
+    log.info("[chat] vector search: %d chunks in %.1fs (n_results=%d filter=%s)",
+             len(matched_ids), time.time() - t, n_results, bool(where))
     sources = [m["source"] for m in metas]
 
-    # Expand with neighbor_chunks before and after each match for richer context
+    t = time.time()
     neighbor_docs, neighbor_metas = _fetch_neighbor_chunks(collection, matched_ids, neighbor_chunks)
+    if neighbor_chunks > 0:
+        log.info("[chat] context expansion: +%d neighbor chunks in %.1fs",
+                 len(neighbor_docs), time.time() - t)
 
     MAX_CHARS = 2000
     context_parts = [
@@ -977,9 +1034,13 @@ def api_chat():
     try:
         answer = _llm_chat(llm_messages, system=system_prompt, max_tokens=2048)
     except anthropic.AuthenticationError:
+        log.error("[chat] authentication error — invalid API key")
         answer = "**Error**: invalid or expired API key. Go to **⚙️ Settings**."
     except Exception as e:
+        log.error("[chat] LLM error: %s", e)
         answer = f"**Error**: {e}"
+
+    log.info("[chat] completed in %.1fs total", time.time() - t_total)
 
     # Build thinking block data
     model_label = {
@@ -1204,16 +1265,21 @@ def _generate_summary_task(stem: str, job_id: str) -> None:
     def put(**kwargs) -> None:
         q.put(kwargs)
 
+    t_total = time.time()
+    log.info("[summary:%s] start — %s", job_id, stem)
+
     try:
         cfg      = load_config()
         provider = cfg.get("llm_provider", "claude")
         if provider == "claude" and not os.environ.get("ANTHROPIC_API_KEY"):
+            log.warning("[summary:%s] no API key", job_id)
             put(type="error", msg="❌ No API key — go to Settings.", done=True)
             return
 
         quarto_dir, _ = _get_output_dirs()
         qmd_path = quarto_dir / f"{stem}.qmd"
         if not qmd_path.exists():
+            log.error("[summary:%s] QMD not found: %s", job_id, qmd_path)
             put(type="error", msg=f"❌ QMD file not found: <em>{stem}.qmd</em>.", done=True)
             return
 
@@ -1231,12 +1297,14 @@ def _generate_summary_task(stem: str, job_id: str) -> None:
         section_items = _parse_qmd_sections(qmd_text)
         MAX_SECTIONS  = 20
         section_items = section_items[:MAX_SECTIONS]
+        log.info("[summary:%s] %d section(s) identified", job_id, len(section_items))
         put(type="log", msg=f"  → {len(section_items)} section(s) identified")
 
         # ── Summarize each section ────────────────────────────────────────────
         section_summaries: list[dict] = []
         for i, (heading, text) in enumerate(section_items, 1):
             excerpt = text[:4000]
+            log.info("[summary:%s] section %d/%d — %s", job_id, i, len(section_items), heading)
             put(type="log",
                 msg=f"🔄 [{i}/{len(section_items)}] <em>{heading}</em>…")
             try:
@@ -1249,6 +1317,7 @@ def _generate_summary_task(stem: str, job_id: str) -> None:
                     max_tokens=350,
                 ).strip()
             except Exception as e:
+                log.error("[summary:%s] section '%s' failed: %s", job_id, heading, e)
                 summary = f"(error: {e})"
 
             section_summaries.append({"heading": heading, "summary": summary})
@@ -1256,6 +1325,7 @@ def _generate_summary_task(stem: str, job_id: str) -> None:
                 msg=f"✔ <strong>{heading}</strong>")
 
         # ── Global summary ────────────────────────────────────────────────────
+        log.info("[summary:%s] generating executive summary", job_id)
         put(type="log", msg="🔄 Generating executive summary…")
         bullets = "\n".join(
             f"- {s['heading']}: {s['summary']}" for s in section_summaries
@@ -1269,6 +1339,7 @@ def _generate_summary_task(stem: str, job_id: str) -> None:
                 max_tokens=450,
             ).strip()
         except Exception as e:
+            log.error("[summary:%s] executive summary failed: %s", job_id, e)
             global_summary = f"(error: {e})"
 
         # ── Save ──────────────────────────────────────────────────────────────
@@ -1281,10 +1352,12 @@ def _generate_summary_task(stem: str, job_id: str) -> None:
         }
         save_path = _summaries_dir() / f"{stem}_summary.json"
         save_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        log.info("[summary:%s] done in %.1fs — saved to %s", job_id, time.time() - t_total, save_path.name)
 
         put(type="done", msg="✅ Summary generated and saved.", data=data)
 
     except Exception as exc:
+        log.exception("[summary:%s] unexpected error: %s", job_id, exc)
         q.put({"type": "error", "msg": f"❌ Unexpected error: {exc}", "done": True})
 
 
@@ -1428,6 +1501,10 @@ def api_doc_delete(stem: str):
 
     threading.Thread(target=_bg_render, daemon=True).start()
 
+    if errors:
+        log.error("[delete] %s — errors: %s", stem, errors)
+    else:
+        log.info("[delete] %s — removed: %s", stem, removed)
     return jsonify({"ok": not errors, "removed": removed, "errors": errors})
 
 
