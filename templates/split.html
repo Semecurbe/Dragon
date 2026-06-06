@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% block title %}Dragon — Split PDF{% endblock %}
+{% block content %}
+<h5 class="mb-1">✂️ Split PDF by chapter</h5>
+<p class="text-muted small mb-3">
+  Upload a PDF that has bookmarks (table of contents). Dragon will detect each top-level
+  chapter and let you download them as individual PDF files in a ZIP archive.
+</p>
+
+{% if not fitz_ok %}
+<div class="alert alert-warning">
+  <strong>PyMuPDF not installed.</strong>
+  Run <code>pip install PyMuPDF</code> then restart the app.
+</div>
+{% endif %}
+
+<!-- Drop zone -->
+<div id="drop-zone"
+     onclick="document.getElementById('split-file').click()"
+     ondragover="event.preventDefault();this.classList.add('drop-hover')"
+     ondragleave="this.classList.remove('drop-hover')"
+     ondrop="handleDrop(event)"
+     style="border:2px dashed #30363d;border-radius:12px;padding:3rem 2rem;
+            text-align:center;cursor:pointer;transition:background .2s;
+            margin-bottom:1rem;background:#161b22">
+  <div style="font-size:2.5rem">📄</div>
+  <p class="mb-1 fw-semibold">Drag &amp; drop a PDF here</p>
+  <p class="text-muted small mb-0">or click to browse</p>
+</div>
+<input type="file" id="split-file" style="display:none" accept=".pdf"
+       onchange="analyze(this.files[0])">
+
+<!-- Spinner -->
+<div id="analyzing" style="display:none" class="text-muted small mb-3">
+  <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+  Reading bookmarks…
+</div>
+
+<!-- Error -->
+<div id="split-error" class="alert alert-danger d-none"></div>
+
+<!-- Chapter list -->
+<div id="results" style="display:none">
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <span id="result-label" class="fw-semibold"></span>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary btn-sm" onclick="reset()">↺ New file</button>
+      <button id="dl-btn" class="btn btn-primary btn-sm" onclick="download()">
+        📦 Download ZIP
+      </button>
+    </div>
+  </div>
+
+  <div style="border:1px solid #30363d;border-radius:8px;overflow:hidden">
+    <table class="table table-sm mb-0" style="color:#e6edf3;background:#161b22">
+      <thead style="background:#21262d;font-size:.82em;color:#8b949e">
+        <tr>
+          <th style="width:2.5rem">#</th>
+          <th>Chapter title</th>
+          <th style="width:6rem;text-align:right">Pages</th>
+          <th style="width:5rem;text-align:right">Count</th>
+        </tr>
+      </thead>
+      <tbody id="chapter-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Download progress -->
+  <div id="dl-progress" class="mt-3" style="display:none">
+    <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+    <span id="dl-progress-msg">Splitting and packaging…</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% raw %}
+let _jobId   = null;
+let _filename = null;
+
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drop-hover');
+  const file = e.dataTransfer.files[0];
+  if (file) analyze(file);
+}
+
+function showError(msg) {
+  const el = document.getElementById('split-error');
+  el.textContent = msg;
+  el.classList.remove('d-none');
+}
+
+function clearError() {
+  document.getElementById('split-error').classList.add('d-none');
+}
+
+async function analyze(file) {
+  if (!file) return;
+  clearError();
+
+  document.getElementById('drop-zone').style.display = 'none';
+  document.getElementById('results').style.display    = 'none';
+  document.getElementById('analyzing').style.display  = '';
+
+  const fd = new FormData();
+  fd.append('file', file);
+
+  try {
+    const r = await fetch('/api/split/analyze', { method: 'POST', body: fd });
+    const d = await r.json();
+
+    document.getElementById('analyzing').style.display = 'none';
+
+    if (d.error) {
+      showError(d.error);
+      document.getElementById('drop-zone').style.display = '';
+      return;
+    }
+
+    _jobId    = d.job_id;
+    _filename = d.filename;
+
+    // Populate table
+    const tbody = document.getElementById('chapter-tbody');
+    tbody.innerHTML = '';
+    d.chapters.forEach(c => {
+      const tr = document.createElement('tr');
+      tr.style.fontSize = '.88em';
+      tr.innerHTML = `
+        <td style="color:#6e7681">${c.n}</td>
+        <td>${esc(c.title)}</td>
+        <td style="text-align:right;color:#8b949e">${c.start_page}–${c.end_page}</td>
+        <td style="text-align:right;color:#8b949e">${c.n_pages}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('result-label').textContent =
+      `${d.chapters.length} chapter${d.chapters.length !== 1 ? 's' : ''} detected — ${d.n_pages} pages total`;
+    document.getElementById('results').style.display = '';
+
+  } catch(e) {
+    document.getElementById('analyzing').style.display = 'none';
+    document.getElementById('drop-zone').style.display = '';
+    showError('Request failed: ' + e);
+  }
+}
+
+async function download() {
+  if (!_jobId) return;
+  clearError();
+
+  const btn = document.getElementById('dl-btn');
+  btn.disabled = true;
+  document.getElementById('dl-progress').style.display = '';
+  document.getElementById('dl-progress-msg').textContent = 'Splitting and packaging…';
+
+  try {
+    const r = await fetch('/api/split/download/' + _jobId);
+    if (!r.ok) {
+      const d = await r.json();
+      showError(d.error || 'Download failed');
+      return;
+    }
+    const blob = await r.blob();
+    const stem = _filename.replace(/\.pdf$/i, '');
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = stem + '_chapters.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    document.getElementById('dl-progress-msg').textContent = '✔ Download started!';
+    btn.disabled = false;
+    // Job is consumed — reset job id so button can't re-download
+    _jobId = null;
+    btn.disabled = true;
+    btn.textContent = '✔ Done';
+  } catch(e) {
+    showError('Download failed: ' + e);
+    document.getElementById('dl-progress').style.display = 'none';
+    btn.disabled = false;
+  }
+}
+
+function reset() {
+  _jobId    = null;
+  _filename = null;
+  document.getElementById('split-file').value = '';
+  document.getElementById('drop-zone').style.display = '';
+  document.getElementById('results').style.display   = 'none';
+  document.getElementById('analyzing').style.display = 'none';
+  document.getElementById('dl-progress').style.display = 'none';
+  document.getElementById('dl-btn').disabled    = false;
+  document.getElementById('dl-btn').textContent = '📦 Download ZIP';
+  clearError();
+}
+
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+{% endraw %}
+</script>
+{% endblock %}

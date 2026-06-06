@@ -7,6 +7,7 @@ Usage: python app_flask.py
 
 import functools
 import http.server
+import io
 import json
 import logging
 import os
@@ -16,15 +17,23 @@ import shutil
 import socket
 import socketserver
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
 import uuid
+import zipfile
 from pathlib import Path
 
 import anthropic
 import chromadb
+try:
+    import fitz as _fitz  # PyMuPDF
+    _FITZ_OK = True
+except ImportError:
+    _fitz = None
+    _FITZ_OK = False
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from docling.chunking import HierarchicalChunker
 from docling.datamodel.base_models import InputFormat
@@ -51,7 +60,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "Answer questions based on the sources below. "
     "If the answer is not found in any source, say so clearly. "
     "Keep a natural conversation flow and remember previous messages."
-    "Add a joke at the end of your response with an emoticon at the beginning to flag it."
+        "Add a joke at the end of your response with an emoticon at the beginning to flag it."
 )
 
 # Directory where app_flask.py lives (used to resolve relative paths)
@@ -734,6 +743,11 @@ self.addEventListener('fetch', (e) => {
 @app.route("/about")
 def about_page():
     return render_template("about.html", active="about")
+
+
+@app.route("/help")
+def help_page():
+    return render_template("help.html", active="help")
 
 
 @app.route("/")
@@ -1564,6 +1578,112 @@ def api_ingest_stream(job_id: str):
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── PDF splitter routes ───────────────────────────────────────────────────────
+
+_split_files: dict[str, Path] = {}   # job_id → temp PDF path
+
+
+@app.route("/split")
+def split_page():
+    return render_template("split.html", active="split", fitz_ok=_FITZ_OK)
+
+
+@app.route("/api/split/analyze", methods=["POST"])
+def api_split_analyze():
+    if not _FITZ_OK:
+        return jsonify({"error": "PyMuPDF not installed — run: pip install PyMuPDF"}), 503
+
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "No file received"}), 400
+    if not f.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "Only PDF files are supported"}), 400
+
+    tmp_dir  = Path(tempfile.mkdtemp(prefix="dragon_split_"))
+    tmp_path = tmp_dir / f.filename
+    f.save(str(tmp_path))
+
+    try:
+        doc = _fitz.open(str(tmp_path))
+        toc = doc.get_toc()
+        n_pages = len(doc)
+        doc.close()
+    except Exception as exc:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return jsonify({"error": f"Could not read PDF: {exc}"}), 400
+
+    # Keep only level-1 entries
+    level1 = [(title, page) for level, title, page in toc if level == 1]
+
+    if not level1:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return jsonify({"error": "No top-level bookmarks found in this PDF. "
+                                 "The file must have a bookmark/outline (table of contents)."}), 422
+
+    chapters = []
+    for i, (title, start_page) in enumerate(level1):
+        end_page = level1[i + 1][1] - 1 if i + 1 < len(level1) else n_pages
+        chapters.append({
+            "n":          i + 1,
+            "title":      title,
+            "start_page": start_page,
+            "end_page":   end_page,
+            "n_pages":    end_page - start_page + 1,
+        })
+
+    job_id = uuid.uuid4().hex[:10]
+    _split_files[job_id] = tmp_path
+    log.info("[split] analyzed %s — %d chapters, %d pages", f.filename, len(chapters), n_pages)
+    return jsonify({"job_id": job_id, "filename": f.filename,
+                    "n_pages": n_pages, "chapters": chapters})
+
+
+@app.route("/api/split/download/<job_id>")
+def api_split_download(job_id: str):
+    if not _FITZ_OK:
+        return jsonify({"error": "PyMuPDF not installed"}), 503
+
+    tmp_path = _split_files.get(job_id)
+    if tmp_path is None or not tmp_path.exists():
+        return jsonify({"error": "Unknown or expired job"}), 404
+
+    try:
+        doc = _fitz.open(str(tmp_path))
+        toc = doc.get_toc()
+        n_pages = len(doc)
+        level1 = [(title, page) for level, title, page in toc if level == 1]
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for i, (title, start_page) in enumerate(level1):
+                end_page = level1[i + 1][1] - 1 if i + 1 < len(level1) else n_pages
+                out = _fitz.open()
+                out.insert_pdf(doc, from_page=start_page - 1, to_page=end_page - 1)
+                safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in title)
+                name = f"{i + 1:02d}_{safe}.pdf"
+                pdf_bytes = out.tobytes()
+                out.close()
+                zf.writestr(name, pdf_bytes)
+        doc.close()
+
+        buf.seek(0)
+        stem = tmp_path.stem
+        log.info("[split] downloaded — %s (%d chapters)", stem, len(level1))
+
+        # Cleanup
+        shutil.rmtree(tmp_path.parent, ignore_errors=True)
+        _split_files.pop(job_id, None)
+
+        return Response(
+            buf.read(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{stem}_chapters.zip"'},
+        )
+    except Exception as exc:
+        log.exception("[split] error: %s", exc)
+        return jsonify({"error": str(exc)}), 500
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

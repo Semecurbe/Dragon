@@ -21,3 +21,6 @@ chromadb>=1.5.9
 
 # Embedding model (runs locally, no API)
 sentence-transformers>=5.5.1
+
+# PDF manipulation (chapter splitter)
+PyMuPDF>=1.24.0
