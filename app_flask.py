@@ -89,8 +89,14 @@ DOCS_BASE = f"http://{HOST_IP}:{DOCS_PORT}"
 APP_BASE  = f"http://{HOST_IP}:{APP_PORT}"
 log.info("Dragon initialising — app: %s  docs: %s", APP_BASE, DOCS_BASE)
 
-chroma   = chromadb.PersistentClient(path=".chroma_db")
-embed_fn = SentenceTransformerEmbeddingFunction(model_name=EMBED_MODEL)
+chroma = chromadb.PersistentClient(path=".chroma_db")
+
+# Read embed model from config (inline — load_config() is not defined yet)
+_start_cfg = json.loads(Path(CONFIG_FILE).read_text(encoding="utf-8")) if Path(CONFIG_FILE).exists() else {}
+embed_fn = SentenceTransformerEmbeddingFunction(
+    model_name=_start_cfg.get("embed_model", EMBED_MODEL)
+)
+del _start_cfg
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -168,6 +174,17 @@ def get_collection():
         name=COLLECTION_NAME,
         embedding_function=embed_fn,
     )
+
+
+def _apply_embed_model(model_name: str) -> None:
+    """Swap the embedding function and wipe the collection (incompatible dimensions)."""
+    global embed_fn
+    embed_fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
+    try:
+        chroma.delete_collection(COLLECTION_NAME)
+    except Exception:
+        pass
+    log.warning("[settings] embed model set to %s — collection reset", model_name)
 
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
@@ -810,6 +827,7 @@ def settings_page():
     openai_model  = config.get("openai_model",   "gpt-4o")
     n_results       = int(config.get("n_results",       N_RESULTS))
     neighbor_chunks = int(config.get("neighbor_chunks", NEIGHBOR_CHUNKS))
+    embed_model     = config.get("embed_model", EMBED_MODEL)
     system_prompt   = config.get("system_prompt",  "") or DEFAULT_SYSTEM_PROMPT
 
     status_color = {"success": "text-success", "danger": "text-danger"}.get(
@@ -832,6 +850,7 @@ def settings_page():
         openai_model=openai_model,
         n_results=n_results,
         neighbor_chunks=neighbor_chunks,
+        embed_model=embed_model,
         system_prompt=system_prompt,
         default_system_prompt=DEFAULT_SYSTEM_PROMPT,
         alert_type=msg_type,
@@ -880,11 +899,24 @@ def settings_save():
     except ValueError:
         pass
 
+    new_embed_model = request.form.get("embed_model", EMBED_MODEL).strip() or EMBED_MODEL
+    old_embed_model = load_config().get("embed_model", EMBED_MODEL)
+    updates["embed_model"] = new_embed_model
+
     updates["system_prompt"] = request.form.get("system_prompt", "").strip()
 
     save_config(updates)
-    log.info("[settings] saved — provider=%s n_results=%s neighbor_chunks=%s",
-             provider, updates.get("n_results"), updates.get("neighbor_chunks"))
+
+    if new_embed_model != old_embed_model:
+        _apply_embed_model(new_embed_model)
+        msg = (f"Embedding model changed to {new_embed_model}. "
+               "Vector database cleared — please re-ingest your documents.")
+        log.info("[settings] saved — provider=%s n_results=%s neighbor_chunks=%s embed_model=%s",
+                 provider, updates.get("n_results"), updates.get("neighbor_chunks"), new_embed_model)
+        return redirect(f"/settings?msg_type=warning&msg={msg}")
+
+    log.info("[settings] saved — provider=%s n_results=%s neighbor_chunks=%s embed_model=%s",
+             provider, updates.get("n_results"), updates.get("neighbor_chunks"), new_embed_model)
     return redirect(f"/settings?msg_type=success&msg={msg}")
 
 

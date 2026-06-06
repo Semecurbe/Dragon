@@ -210,6 +210,32 @@
         giving the LLM more surrounding context at the cost of more tokens.
       </p>
     </div>
+
+    <hr style="border-color:#30363d;margin:1.2rem 0">
+
+    <div style="max-width:500px">
+      <label class="form-label small fw-semibold">Embedding model</label>
+      <input type="text" name="embed_model" class="form-control"
+             value="{{ embed_model }}" list="embed-models-list"
+             placeholder="all-MiniLM-L6-v2"
+             style="background:#161b22;color:#e6edf3;border-color:#30363d;font-family:monospace">
+      <datalist id="embed-models-list">
+        <option value="all-MiniLM-L6-v2">all-MiniLM-L6-v2 — fast, 384 dims, English (default)</option>
+        <option value="all-MiniLM-L12-v2">all-MiniLM-L12-v2 — 384 dims, slightly better quality</option>
+        <option value="all-mpnet-base-v2">all-mpnet-base-v2 — 768 dims, best English quality</option>
+        <option value="paraphrase-multilingual-MiniLM-L12-v2">paraphrase-multilingual-MiniLM-L12-v2 — 384 dims, 50+ languages</option>
+        <option value="paraphrase-multilingual-mpnet-base-v2">paraphrase-multilingual-mpnet-base-v2 — 768 dims, multilingual quality</option>
+        <option value="BAAI/bge-small-en-v1.5">BAAI/bge-small-en-v1.5 — 384 dims, fast English</option>
+        <option value="BAAI/bge-base-en-v1.5">BAAI/bge-base-en-v1.5 — 768 dims, strong English</option>
+      </datalist>
+      <p class="text-muted small mt-1 mb-0">
+        Any model from
+        <a href="https://huggingface.co/sentence-transformers" target="_blank"
+           style="color:#58a6ff">sentence-transformers</a> is supported.
+        <strong style="color:#e3b341">⚠ Changing this model clears the vector database —
+        all documents must be re-ingested.</strong>
+      </p>
+    </div>
   </div>
 
   <div class="mt-3">
