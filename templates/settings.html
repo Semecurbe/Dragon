@@ -317,6 +317,41 @@
     <button type="submit" class="btn btn-primary">💾 Save</button>
   </div>
 </form>
+
+<!-- ── User management ─────────────────────────────────────────────────── -->
+<div class="mt-4 p-3 rounded" style="background:#21262d;border:1px solid #30363d">
+  <p class="fw-semibold mb-3">👤 User Management</p>
+
+  <!-- User list -->
+  <div id="user-list" class="mb-3"></div>
+
+  <!-- Add user form -->
+  <details class="mt-2">
+    <summary style="cursor:pointer;color:#58a6ff;font-size:.88em;user-select:none">
+      ＋ Add a new user
+    </summary>
+    <div class="mt-2 p-2 rounded" style="background:#161b22;border:1px solid #30363d;max-width:480px">
+      <div class="row g-2">
+        <div class="col-5">
+          <label class="form-label small fw-semibold">Username</label>
+          <input type="text" id="new-username" class="form-control form-control-sm"
+                 style="background:#0d1117;color:#e6edf3;border-color:#30363d"
+                 placeholder="username" autocomplete="off">
+        </div>
+        <div class="col-5">
+          <label class="form-label small fw-semibold">Password <span class="text-muted">(min. 6)</span></label>
+          <input type="password" id="new-password" class="form-control form-control-sm"
+                 style="background:#0d1117;color:#e6edf3;border-color:#30363d"
+                 placeholder="••••••" autocomplete="new-password">
+        </div>
+        <div class="col-2 d-flex align-items-end">
+          <button class="btn btn-sm btn-primary w-100" onclick="createUser()">Add</button>
+        </div>
+      </div>
+      <div id="add-user-status" class="small mt-1"></div>
+    </div>
+  </details>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -370,6 +405,98 @@ async function testPg() {
     status.innerHTML = `<span class="text-danger">❌ Network error: ${e}</span>`;
   }
 }
+
+// ── User management ──────────────────────────────────────────────────────────
+
+async function loadUsers() {
+  const d = await fetch('/api/users').then(r => r.json());
+  const box = document.getElementById('user-list');
+  if (!d.users || !d.users.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <table class="table table-sm mb-0" style="color:#e6edf3;font-size:.88em">
+      <thead style="color:#8b949e">
+        <tr><th>Username</th><th>Role</th><th>Password</th><th></th></tr>
+      </thead>
+      <tbody>
+        ${d.users.map(u => `
+          <tr id="user-row-${esc(u.username)}">
+            <td>${esc(u.username)}</td>
+            <td><span class="badge ${u.role === 'admin' ? 'bg-primary' : 'bg-secondary'}">${esc(u.role)}</span></td>
+            <td>
+              <div class="d-flex gap-1">
+                <input type="password" id="pw-${esc(u.username)}"
+                       class="form-control form-control-sm"
+                       style="max-width:140px;background:#0d1117;color:#e6edf3;border-color:#30363d"
+                       placeholder="new password" autocomplete="new-password">
+                <button class="btn btn-sm btn-outline-secondary"
+                        onclick="changePassword('${esc(u.username)}')">Change</button>
+              </div>
+              <span id="pw-status-${esc(u.username)}" class="small"></span>
+            </td>
+            <td>
+              <button class="btn btn-sm btn-outline-danger"
+                      onclick="deleteUser('${esc(u.username)}')">Delete</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+async function createUser() {
+  const username = document.getElementById('new-username').value.trim();
+  const password = document.getElementById('new-password').value;
+  const status   = document.getElementById('add-user-status');
+  const r = await fetch('/api/users/create', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ username, password })
+  });
+  const d = await r.json();
+  if (d.ok) {
+    status.innerHTML = '<span class="text-success">✔ User created</span>';
+    document.getElementById('new-username').value = '';
+    document.getElementById('new-password').value = '';
+    loadUsers();
+  } else {
+    status.innerHTML = `<span class="text-danger">❌ ${d.error}</span>`;
+  }
+}
+
+async function changePassword(username) {
+  const pw = document.getElementById('pw-' + username).value;
+  const s  = document.getElementById('pw-status-' + username);
+  const r  = await fetch('/api/users/password', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ username, password: pw })
+  });
+  const d = await r.json();
+  s.innerHTML = d.ok
+    ? '<span class="text-success">✔ Changed</span>'
+    : `<span class="text-danger">❌ ${d.error}</span>`;
+  if (d.ok) document.getElementById('pw-' + username).value = '';
+}
+
+async function deleteUser(username) {
+  if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+  const r = await fetch('/api/users/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ username })
+  });
+  const d = await r.json();
+  if (d.ok) {
+    loadUsers();
+  } else {
+    alert('Error: ' + d.error);
+  }
+}
+
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+loadUsers();
 
 async function testOllama() {
   const url    = document.getElementById('ollama-url').value.trim();

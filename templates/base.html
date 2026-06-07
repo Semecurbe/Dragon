@@ -42,9 +42,15 @@
       </li>
       {% endfor %}
     </ul>
-    <button id="pwa-install-btn" class="d-none ms-3" onclick="installPwa()">
-      📲 Install
-    </button>
+    <div class="d-flex align-items-center gap-2 ms-3">
+      <button id="pwa-install-btn" class="d-none" onclick="installPwa()">
+        📲 Install
+      </button>
+      {% if session.user %}
+      <span class="text-white-50 small">👤 {{ session.user }}</span>
+      <a href="/logout" class="btn btn-sm btn-outline-secondary" style="font-size:.8em;padding:.2rem .6rem">Sign out</a>
+      {% endif %}
+    </div>
   </div>
 </nav>
 <div class="container">

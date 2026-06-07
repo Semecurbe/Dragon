@@ -41,6 +41,7 @@ from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import ImageRefMode
 from flask import Flask, Response, jsonify, redirect, render_template, request, session, stream_with_context
+from werkzeug.security import check_password_hash, generate_password_hash
 from process_documents import (
     build_index_page, build_quarto_page, build_quarto_yml,
     chunk_to_dict, extract_images, strip_toc_and_summary, is_toc_chunk,
@@ -53,6 +54,7 @@ CLAUDE_MODEL          = "claude-sonnet-4-6"
 N_RESULTS             = 5
 NEIGHBOR_CHUNKS       = 2
 CONFIG_FILE           = ".rag_config.json"
+USERS_FILE            = "users.json"
 DOCS_PORT             = 8080
 APP_PORT              = 7860
 DEFAULT_SYSTEM_PROMPT = (
@@ -101,7 +103,14 @@ del _start_cfg
 _pg_store = None   # PgVectorStore instance, created lazily
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+
+# Persistent secret key so sessions survive app restarts
+_sk_raw = json.loads(Path(CONFIG_FILE).read_text(encoding="utf-8")) if Path(CONFIG_FILE).exists() else {}
+if "secret_key" not in _sk_raw:
+    _sk_raw["secret_key"] = os.urandom(32).hex()
+    Path(CONFIG_FILE).write_text(json.dumps(_sk_raw, ensure_ascii=False, indent=2), encoding="utf-8")
+app.secret_key = bytes.fromhex(_sk_raw["secret_key"])
+del _sk_raw
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -117,6 +126,155 @@ def save_config(data: dict) -> None:
     Path(CONFIG_FILE).write_text(
         json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+
+# ── User management ──────────────────────────────────────────────────────────
+
+def load_users() -> dict:
+    p = APP_DIR / USERS_FILE
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+
+
+def save_users(users: dict) -> None:
+    (APP_DIR / USERS_FILE).write_text(
+        json.dumps(users, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+# ── Authentication gate ────────────────────────────────────────────────────────
+
+_PUBLIC_PATHS = {"/login", "/logout", "/setup", "/manifest.json", "/sw.js"}
+
+
+@app.before_request
+def _require_login():
+    if (request.path in _PUBLIC_PATHS
+            or request.path.startswith("/static/")
+            or request.path.startswith("/icon/")):
+        return None
+    users = load_users()
+    if not users:
+        return redirect("/setup")
+    if not session.get("user"):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Authentication required"}), 401
+        return redirect(f"/login?next={request.path}")
+
+
+# ── Auth routes ───────────────────────────────────────────────────────────────
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    users = load_users()
+    if not users:
+        return redirect("/setup")
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        user = users.get(username)
+        if user and check_password_hash(user["password_hash"], password):
+            session["user"] = username
+            log.info("[auth] login: %s", username)
+            return redirect(request.args.get("next") or "/chat")
+        error = "Invalid username or password."
+        log.warning("[auth] failed login attempt for: %s", username)
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    log.info("[auth] logout: %s", session.get("user"))
+    session.clear()
+    return redirect("/login")
+
+
+@app.route("/setup", methods=["GET", "POST"])
+def setup():
+    if load_users():
+        return redirect("/login")
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        password2 = request.form.get("password2", "")
+        if not username or not password:
+            error = "Username and password are required."
+        elif password != password2:
+            error = "Passwords do not match."
+        elif len(password) < 6:
+            error = "Password must be at least 6 characters."
+        else:
+            save_users({username: {"password_hash": generate_password_hash(password),
+                                   "role": "admin"}})
+            session["user"] = username
+            log.info("[auth] first user created: %s", username)
+            return redirect("/chat")
+    return render_template("setup.html", error=error)
+
+
+# ── User management API ────────────────────────────────────────────────────────
+
+@app.route("/api/users")
+def api_users():
+    users = load_users()
+    return jsonify({"users": [{"username": u, "role": d.get("role", "user")}
+                               for u, d in users.items()]})
+
+
+@app.route("/api/users/create", methods=["POST"])
+def api_users_create():
+    data     = request.json or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password", "")
+    if not username or not password:
+        return jsonify({"ok": False, "error": "Username and password required"}), 400
+    if len(password) < 6:
+        return jsonify({"ok": False, "error": "Password must be at least 6 characters"}), 400
+    users = load_users()
+    if username in users:
+        return jsonify({"ok": False, "error": f"User '{username}' already exists"}), 409
+    users[username] = {"password_hash": generate_password_hash(password),
+                       "role": data.get("role", "user")}
+    save_users(users)
+    log.info("[users] created: %s (by %s)", username, session.get("user"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/users/password", methods=["POST"])
+def api_users_password():
+    data   = request.json or {}
+    target = (data.get("username") or "").strip()
+    new_pw = data.get("password", "")
+    if not target or not new_pw:
+        return jsonify({"ok": False, "error": "Username and new password required"}), 400
+    if len(new_pw) < 6:
+        return jsonify({"ok": False, "error": "Password must be at least 6 characters"}), 400
+    users = load_users()
+    if target not in users:
+        return jsonify({"ok": False, "error": f"User '{target}' not found"}), 404
+    users[target]["password_hash"] = generate_password_hash(new_pw)
+    save_users(users)
+    log.info("[users] password changed for: %s (by %s)", target, session.get("user"))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/users/delete", methods=["POST"])
+def api_users_delete():
+    data    = request.json or {}
+    target  = (data.get("username") or "").strip()
+    current = session.get("user")
+    if target == current:
+        return jsonify({"ok": False, "error": "Cannot delete your own account"}), 400
+    users = load_users()
+    if target not in users:
+        return jsonify({"ok": False, "error": f"User '{target}' not found"}), 404
+    if len(users) <= 1:
+        return jsonify({"ok": False, "error": "Cannot delete the last user"}), 400
+    del users[target]
+    save_users(users)
+    log.info("[users] deleted: %s (by %s)", target, current)
+    return jsonify({"ok": True})
 
 
 def _resolve_site(raw: str) -> Path:
