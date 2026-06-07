@@ -213,6 +213,81 @@
 
     <hr style="border-color:#30363d;margin:1.2rem 0">
 
+    <!-- Vector backend -->
+    <p class="fw-semibold small mb-2">Vector store backend</p>
+    <div class="d-flex flex-wrap gap-4 mb-3">
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="vector_backend"
+               id="vb-chroma" value="chroma"
+               {% if vector_backend == "chroma" %}checked{% endif %}
+               onchange="switchBackend(this.value)">
+        <label class="form-check-label" for="vb-chroma">
+          🗃️ <strong>ChromaDB</strong> — local file (default)
+        </label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="vector_backend"
+               id="vb-postgres" value="postgres"
+               {% if vector_backend == "postgres" %}checked{% endif %}
+               onchange="switchBackend(this.value)">
+        <label class="form-check-label" for="vb-postgres">
+          🐘 <strong>PostgreSQL</strong> + pgvector
+        </label>
+      </div>
+    </div>
+
+    <div id="section-postgres" {% if vector_backend != "postgres" %}style="display:none"{% endif %}
+         class="mb-3 p-3 rounded" style="background:#0d1117;border:1px solid #30363d">
+      <p class="text-muted small mb-2">
+        Requires the <code>pgvector</code> extension on your PostgreSQL server and
+        <code>pip install psycopg2-binary pgvector</code>.
+      </p>
+      <div class="row g-2" style="max-width:660px">
+        <div class="col-5">
+          <label class="form-label small fw-semibold">Host</label>
+          <input type="text" name="pg_host" id="pg-host" class="form-control"
+                 value="{{ pg_host }}" placeholder="localhost"
+                 style="background:#161b22;color:#e6edf3;border-color:#30363d">
+        </div>
+        <div class="col-2">
+          <label class="form-label small fw-semibold">Port</label>
+          <input type="number" name="pg_port" id="pg-port" class="form-control"
+                 value="{{ pg_port }}" placeholder="5432"
+                 style="background:#161b22;color:#e6edf3;border-color:#30363d">
+        </div>
+        <div class="col-5">
+          <label class="form-label small fw-semibold">Database</label>
+          <input type="text" name="pg_database" id="pg-database" class="form-control"
+                 value="{{ pg_database }}" placeholder="dragon"
+                 style="background:#161b22;color:#e6edf3;border-color:#30363d">
+        </div>
+        <div class="col-4">
+          <label class="form-label small fw-semibold">User</label>
+          <input type="text" name="pg_user" id="pg-user" class="form-control"
+                 value="{{ pg_user }}" placeholder="postgres"
+                 style="background:#161b22;color:#e6edf3;border-color:#30363d">
+        </div>
+        <div class="col-5">
+          <label class="form-label small fw-semibold">Password</label>
+          <input type="password" name="pg_password" id="pg-password" class="form-control"
+                 placeholder="leave blank to keep saved value"
+                 style="background:#161b22;color:#e6edf3;border-color:#30363d"
+                 autocomplete="off">
+        </div>
+        <div class="col-3 d-flex align-items-end">
+          <button type="button" class="btn btn-outline-secondary w-100"
+                  onclick="testPg()">🔍 Test</button>
+        </div>
+      </div>
+      <div id="pg-status" class="small mt-2"></div>
+      <p class="text-muted small mt-2 mb-0">
+        <strong style="color:#e3b341">⚠ Switching backends clears the active vector store —
+        re-ingest your documents after saving.</strong>
+      </p>
+    </div>
+
+    <hr style="border-color:#30363d;margin:1.2rem 0">
+
     <div style="max-width:500px">
       <label class="form-label small fw-semibold">Embedding model</label>
       <input type="text" name="embed_model" class="form-control"
@@ -266,6 +341,34 @@ function switchProvider(val) {
   ['claude', 'gemini', 'openai', 'ollama'].forEach(p => {
     document.getElementById('section-' + p).style.display = val === p ? '' : 'none';
   });
+}
+
+function switchBackend(val) {
+  document.getElementById('section-postgres').style.display = val === 'postgres' ? '' : 'none';
+}
+
+async function testPg() {
+  const status = document.getElementById('pg-status');
+  status.innerHTML = '<span class="text-muted">Connecting…</span>';
+  try {
+    const r = await fetch('/api/pg/test', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        host:     document.getElementById('pg-host').value.trim(),
+        port:     parseInt(document.getElementById('pg-port').value) || 5432,
+        database: document.getElementById('pg-database').value.trim(),
+        user:     document.getElementById('pg-user').value.trim(),
+        password: document.getElementById('pg-password').value,
+      })
+    });
+    const d = await r.json();
+    status.innerHTML = d.ok
+      ? `<span class="text-success">✔ ${d.message}</span>`
+      : `<span class="text-danger">❌ ${d.error}</span>`;
+  } catch(e) {
+    status.innerHTML = `<span class="text-danger">❌ Network error: ${e}</span>`;
+  }
 }
 
 async function testOllama() {

@@ -24,3 +24,8 @@ sentence-transformers>=5.5.1
 
 # PDF manipulation (chapter splitter)
 PyMuPDF>=1.24.0
+
+# PostgreSQL vector store — optional alternative to ChromaDB
+# pip install psycopg2-binary pgvector
+# psycopg2-binary>=2.9
+# pgvector>=0.3

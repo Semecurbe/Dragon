@@ -98,6 +98,8 @@ embed_fn = SentenceTransformerEmbeddingFunction(
 )
 del _start_cfg
 
+_pg_store = None   # PgVectorStore instance, created lazily
+
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
@@ -170,6 +172,14 @@ def api_key_status() -> tuple[str, str]:
 # ── ChromaDB ──────────────────────────────────────────────────────────────────
 
 def get_collection():
+    config  = load_config()
+    backend = config.get("vector_backend", "chroma")
+    if backend == "postgres":
+        global _pg_store
+        if _pg_store is None:
+            dim = len(embed_fn(["_"])[0])
+            _pg_store = PgVectorStore(_build_pg_dsn(config), dim)
+        return _pg_store
     return chroma.get_or_create_collection(
         name=COLLECTION_NAME,
         embedding_function=embed_fn,
@@ -177,14 +187,184 @@ def get_collection():
 
 
 def _apply_embed_model(model_name: str) -> None:
-    """Swap the embedding function and wipe the collection (incompatible dimensions)."""
-    global embed_fn
+    """Swap the embedding function and wipe all vector stores (incompatible dimensions)."""
+    global embed_fn, _pg_store
     embed_fn = SentenceTransformerEmbeddingFunction(model_name=model_name)
     try:
         chroma.delete_collection(COLLECTION_NAME)
     except Exception:
         pass
-    log.warning("[settings] embed model set to %s — collection reset", model_name)
+    if _pg_store is not None:
+        try:
+            _pg_store.drop_table()
+        except Exception:
+            pass
+        _pg_store = None
+    log.warning("[settings] embed model set to %s — all vector stores reset", model_name)
+
+
+# ── PostgreSQL pgvector store ─────────────────────────────────────────────────
+
+def _build_pg_dsn(config: dict) -> str:
+    host = config.get("pg_host",     "localhost")
+    port = config.get("pg_port",     5432)
+    db   = config.get("pg_database", "dragon")
+    user = config.get("pg_user",     "postgres")
+    pwd  = config.get("pg_password", "")
+    return f"host={host} port={port} dbname={db} user={user} password={pwd}"
+
+
+class PgVectorStore:
+    """Duck-type replacement for a ChromaDB collection, backed by PostgreSQL + pgvector."""
+
+    TABLE = "dragon_chunks"
+
+    def __init__(self, dsn: str, dim: int):
+        try:
+            import psycopg2       # noqa: F401
+            import pgvector.psycopg2  # noqa: F401
+        except ImportError:
+            raise RuntimeError(
+                "PostgreSQL backend requires: pip install psycopg2-binary pgvector"
+            )
+        self._dsn = dsn
+        self._dim = dim
+        self._ensure_schema()
+
+    def _conn(self):
+        import psycopg2
+        from pgvector.psycopg2 import register_vector
+        conn = psycopg2.connect(self._dsn)
+        register_vector(conn)
+        return conn
+
+    @staticmethod
+    def _vec_str(vec) -> str:
+        return "[" + ",".join(f"{float(x):.8f}" for x in vec) + "]"
+
+    @staticmethod
+    def _sources(where: dict) -> list:
+        if "$or" in where:
+            return [c["source"] for c in where["$or"]]
+        return [where["source"]]
+
+    def _ensure_schema(self):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                cur.execute(f"""
+                    CREATE TABLE IF NOT EXISTS {self.TABLE} (
+                        id        TEXT PRIMARY KEY,
+                        source    TEXT NOT NULL,
+                        headings  TEXT DEFAULT '[]',
+                        document  TEXT NOT NULL,
+                        embedding vector({self._dim})
+                    )
+                """)
+                cur.execute(f"""
+                    CREATE INDEX IF NOT EXISTS {self.TABLE}_source_idx
+                    ON {self.TABLE}(source)
+                """)
+                cur.execute(f"""
+                    CREATE INDEX IF NOT EXISTS {self.TABLE}_emb_idx
+                    ON {self.TABLE} USING hnsw (embedding vector_cosine_ops)
+                """)
+            conn.commit()
+
+    def add(self, documents, metadatas, ids):
+        if not documents:
+            return
+        vectors = embed_fn(list(documents))
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                for doc, meta, id_, vec in zip(documents, metadatas, ids, vectors):
+                    cur.execute(f"""
+                        INSERT INTO {self.TABLE} (id, source, headings, document, embedding)
+                        VALUES (%s, %s, %s, %s, %s::vector)
+                        ON CONFLICT (id) DO UPDATE SET
+                            source=EXCLUDED.source, headings=EXCLUDED.headings,
+                            document=EXCLUDED.document, embedding=EXCLUDED.embedding
+                    """, (id_, meta.get("source", ""), meta.get("headings", "[]"),
+                          doc, self._vec_str(vec)))
+            conn.commit()
+
+    def get(self, ids=None, where=None, include=None):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                if ids is not None:
+                    cur.execute(
+                        f"SELECT id, source, headings, document FROM {self.TABLE}"
+                        " WHERE id = ANY(%s)",
+                        (list(ids),)
+                    )
+                elif where is not None:
+                    cur.execute(
+                        f"SELECT id, source, headings, document FROM {self.TABLE}"
+                        " WHERE source = ANY(%s)",
+                        (self._sources(where),)
+                    )
+                else:
+                    cur.execute(
+                        f"SELECT id, source, headings, document FROM {self.TABLE}"
+                    )
+                rows = cur.fetchall()
+        return {
+            "ids":       [r[0] for r in rows],
+            "metadatas": [{"source": r[1], "headings": r[2]} for r in rows],
+            "documents": [r[3] for r in rows],
+        }
+
+    def delete(self, ids=None, where=None):
+        if ids is None and where is None:
+            return
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                if ids is not None:
+                    cur.execute(
+                        f"DELETE FROM {self.TABLE} WHERE id = ANY(%s)", (list(ids),)
+                    )
+                else:
+                    cur.execute(
+                        f"DELETE FROM {self.TABLE} WHERE source = ANY(%s)",
+                        (self._sources(where),)
+                    )
+            conn.commit()
+
+    def query(self, query_texts, n_results, where=None):
+        vectors = embed_fn(list(query_texts))
+        all_ids, all_docs, all_metas, all_dists = [], [], [], []
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                for vec in vectors:
+                    vs = self._vec_str(vec)
+                    if where is not None:
+                        cur.execute(f"""
+                            SELECT id, source, headings, document,
+                                   (embedding <=> %s::vector) AS dist
+                            FROM {self.TABLE} WHERE source = ANY(%s)
+                            ORDER BY dist LIMIT %s
+                        """, (vs, self._sources(where), n_results))
+                    else:
+                        cur.execute(f"""
+                            SELECT id, source, headings, document,
+                                   (embedding <=> %s::vector) AS dist
+                            FROM {self.TABLE} ORDER BY dist LIMIT %s
+                        """, (vs, n_results))
+                    rows = cur.fetchall()
+                    all_ids.append([r[0] for r in rows])
+                    all_metas.append([{"source": r[1], "headings": r[2]} for r in rows])
+                    all_docs.append([r[3] for r in rows])
+                    all_dists.append([float(r[4]) for r in rows])
+        return {
+            "ids": all_ids, "documents": all_docs,
+            "metadatas": all_metas, "distances": all_dists,
+        }
+
+    def drop_table(self):
+        with self._conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"DROP TABLE IF EXISTS {self.TABLE}")
+            conn.commit()
 
 
 # ── Utils ─────────────────────────────────────────────────────────────────────
@@ -827,7 +1007,12 @@ def settings_page():
     openai_model  = config.get("openai_model",   "gpt-4o")
     n_results       = int(config.get("n_results",       N_RESULTS))
     neighbor_chunks = int(config.get("neighbor_chunks", NEIGHBOR_CHUNKS))
-    embed_model     = config.get("embed_model", EMBED_MODEL)
+    embed_model     = config.get("embed_model",     EMBED_MODEL)
+    vector_backend  = config.get("vector_backend",  "chroma")
+    pg_host         = config.get("pg_host",         "localhost")
+    pg_port         = config.get("pg_port",         5432)
+    pg_database     = config.get("pg_database",     "dragon")
+    pg_user         = config.get("pg_user",         "postgres")
     system_prompt   = config.get("system_prompt",  "") or DEFAULT_SYSTEM_PROMPT
 
     status_color = {"success": "text-success", "danger": "text-danger"}.get(
@@ -851,6 +1036,11 @@ def settings_page():
         n_results=n_results,
         neighbor_chunks=neighbor_chunks,
         embed_model=embed_model,
+        vector_backend=vector_backend,
+        pg_host=pg_host,
+        pg_port=pg_port,
+        pg_database=pg_database,
+        pg_user=pg_user,
         system_prompt=system_prompt,
         default_system_prompt=DEFAULT_SYSTEM_PROMPT,
         alert_type=msg_type,
@@ -903,20 +1093,40 @@ def settings_save():
     old_embed_model = load_config().get("embed_model", EMBED_MODEL)
     updates["embed_model"] = new_embed_model
 
+    # ── Vector backend ────────────────────────────────────────────────────────
+    old_backend = load_config().get("vector_backend", "chroma")
+    new_backend = request.form.get("vector_backend", "chroma")
+    updates["vector_backend"] = new_backend
+    if new_backend == "postgres":
+        updates["pg_host"]     = request.form.get("pg_host",     "localhost").strip()
+        updates["pg_port"]     = int(request.form.get("pg_port", "5432") or "5432")
+        updates["pg_database"] = request.form.get("pg_database", "dragon").strip()
+        updates["pg_user"]     = request.form.get("pg_user",     "postgres").strip()
+        pg_pwd = request.form.get("pg_password", "").strip()
+        if pg_pwd:
+            updates["pg_password"] = pg_pwd
+
     updates["system_prompt"] = request.form.get("system_prompt", "").strip()
 
     save_config(updates)
+
+    # Reset pg store if backend or embed model changed
+    if new_backend != old_backend:
+        global _pg_store
+        _pg_store = None
+        log.info("[settings] vector backend changed: %s → %s", old_backend, new_backend)
 
     if new_embed_model != old_embed_model:
         _apply_embed_model(new_embed_model)
         msg = (f"Embedding model changed to {new_embed_model}. "
                "Vector database cleared — please re-ingest your documents.")
-        log.info("[settings] saved — provider=%s n_results=%s neighbor_chunks=%s embed_model=%s",
-                 provider, updates.get("n_results"), updates.get("neighbor_chunks"), new_embed_model)
+        log.info("[settings] saved — provider=%s embed_model=%s backend=%s",
+                 provider, new_embed_model, new_backend)
         return redirect(f"/settings?msg_type=warning&msg={msg}")
 
-    log.info("[settings] saved — provider=%s n_results=%s neighbor_chunks=%s embed_model=%s",
-             provider, updates.get("n_results"), updates.get("neighbor_chunks"), new_embed_model)
+    log.info("[settings] saved — provider=%s n_results=%s neighbor_chunks=%s embed_model=%s backend=%s",
+             provider, updates.get("n_results"), updates.get("neighbor_chunks"),
+             new_embed_model, new_backend)
     return redirect(f"/settings?msg_type=success&msg={msg}")
 
 
@@ -989,6 +1199,41 @@ def api_ollama_models():
         return jsonify({"ok": False, "error": f"Ollama unreachable: {e.reason}"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+@app.route("/api/pg/test", methods=["POST"])
+def api_pg_test():
+    """Test a PostgreSQL + pgvector connection from the Settings page."""
+    data = request.json or {}
+    try:
+        import psycopg2
+        from pgvector.psycopg2 import register_vector
+    except ImportError:
+        return jsonify({"ok": False,
+                        "error": "Missing packages — run: pip install psycopg2-binary pgvector"})
+    cfg = {
+        "pg_host":     data.get("host",     "localhost"),
+        "pg_port":     data.get("port",     5432),
+        "pg_database": data.get("database", "dragon"),
+        "pg_user":     data.get("user",     "postgres"),
+        "pg_password": data.get("password", ""),
+    }
+    try:
+        conn = psycopg2.connect(_build_pg_dsn(cfg))
+        register_vector(conn)
+        cur = conn.cursor()
+        cur.execute("SELECT version()")
+        pg_ver = cur.fetchone()[0].split(",")[0]
+        cur.execute("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+        if cur.fetchone() is None:
+            conn.close()
+            return jsonify({"ok": False,
+                            "error": "pgvector extension not available on this server. "
+                                     "Install it then run: CREATE EXTENSION vector;"})
+        conn.close()
+        return jsonify({"ok": True, "message": f"Connected — {pg_ver}, pgvector available"})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)})
+
 
 @app.route("/api/chat", methods=["POST"])
 def api_chat():
