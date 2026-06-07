@@ -8,7 +8,7 @@ A local RAG (*Retrieval-Augmented Generation*) application to query your documen
 
 
 <p align="center">
-  <img src="static/screenshot_dragon.png" alt="Dragon screenshot" height="300">
+  <img src="static/screenshot_dragon.png" alt="Dragon screenshot" height="500">
 </p>
 
 
