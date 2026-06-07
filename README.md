@@ -6,6 +6,13 @@
 
 A local RAG (*Retrieval-Augmented Generation*) application to query your documents (PDF, DOCX, PPTX, etc.) and get answers from Claude with clickable links to the source sections.
 
+
+<p align="center">
+  <img src="static/screenschot_dragon" alt="Dragon screenshot" height="300">
+</p>
+
+
+
 → **[Full installation guide](INSTALL.md)**
 
 ---
